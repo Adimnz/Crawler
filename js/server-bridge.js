@@ -35,10 +35,11 @@
   }
   function disconnected(stopping = false) {
     if (!connected && !everConnected && !stopping) return;
+    const changed = connected || (!shuttingDown && stopping);
     connected = false; health = null; shuttingDown = shuttingDown || stopping;
     nextProbeAt = Date.now() + retryDelay;
     retryDelay = Math.min(60000, retryDelay * 2);
-    lifecycleUI(); emit();
+    lifecycleUI(); if (changed) emit();
   }
   async function request(path, body, timeout = 45000) {
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeout);
@@ -74,7 +75,7 @@
       disconnected();
       lastFailure = 'The research API is unavailable at this address. Open the URL printed by the Python server.';
     }
-    lifecycleUI(); emit();
+    lifecycleUI(); if (connected !== wasConnected) emit();
     if (connected && !wasConnected && inWorkspace()) { refresh(true).catch(() => {}); pull().catch(() => {}); }
   }
   function refresh(force = false) {
@@ -147,7 +148,9 @@
     pendingDossiers.add(serverId);
     try {
       const value = await request('dossier?documentId=' + encodeURIComponent(serverId));
+      dossiers.delete(serverId);
       dossiers.set(serverId, { value, fetchedAt: Date.now() });
+      if (dossiers.size > 120) dossiers.delete(dossiers.keys().next().value);
       let reviewedChanged = false;
       const localDocs = new Map([...engine.documents.values()].filter(d => d.serverId).map(d => [d.serverId, d]));
       for (const claim of value.claims) {
@@ -178,7 +181,7 @@
   window.CrawlerServer = {
     request, refresh, pull, probe, dossier, cachedDossier, mutation, serverEvent,
     get connected() { return connected; }, get health() { return health; }, get session() { return session; }, get sources() { return serverSources; }, get workspace() { return workspace; }, get operations() { return operations; }, get metrics() { return metrics; }, get error() { return lastFailure; },
-    async login(token) { session = await request('login', { token }); connected = !!session.authorized; emit(); if (inWorkspace()) { refresh().catch(() => {}); pull().catch(() => {}); } },
+    async login(token) { session = await request('login', { token }); connected = !!session.authorized; if (connected) { everConnected = true; shuttingDown = false; } lifecycleUI(); emit(); if (inWorkspace()) { refresh().catch(() => {}); pull().catch(() => {}); } },
     async shutdown() {
       if (!connected || !session?.ownerAuthorized) throw new Error('Only the research server owner can stop it.');
       const result = await request('control/shutdown', {});
