@@ -19,7 +19,6 @@
     researchStrip.innerHTML = '<div><span class="assistant-symbol">✧</span><b>Ask your research</b><span class="dim sm">An answer is only as useful as its evidence.</span></div>';
     researchStrip.append($('research-question'));
     $('tab-intelligence').querySelector('.research-heading').after(researchStrip);
-    researchStrip.insertAdjacentHTML('afterend', '<nav class="overview-jumps" aria-label="Jump within overview"><button data-jump="signal-list">Signals</button><button data-jump="overview-markets">Markets</button><button data-jump="overview-news">Reporting</button></nav>');
     $('research-query').placeholder = 'What is changing, why does it matter, and what should I watch?';
     $('clear-chat').textContent = 'Reset';
     const controls = $('tab-intelligence').querySelector('.research-controls'), more = document.createElement('details');
@@ -63,6 +62,7 @@
     $('overview-radar').addEventListener('toggle', () => renderRadar());
     $('overview-stream').addEventListener('toggle', () => renderStream());
     document.addEventListener('click', handleClick, true);
+    document.addEventListener('error', event => { const img = event.target; if (img.tagName === 'IMG' && img.closest('.news-card')) { img.closest('.news-card').classList.add('noimg'); img.remove(); } }, true);
     document.addEventListener('submit', handleToolSubmit);
     document.addEventListener('keydown', event => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('filter').focus(); $('filter').select(); }
@@ -82,25 +82,35 @@
     compose(); window.scrollTo({ top: 0, behavior: 'instant' });
   }
   function focusResearch() { navigate('overview'); $('research-query').focus(); $('research-strip').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  const PAGES = {
+    overview: ['THE RESEARCH DESK', 'Priority signals', 'The developments that matter, with their evidence close at hand.'],
+    markets: ['MARKETS', 'Market context', 'Provider quotes, activity and related reporting for each tracked asset.'],
+    reporting: ['REPORTING', 'Latest reporting', 'Original links, attribution and timestamps from every collected source.'],
+    activity: ['ACTIVITY', 'All collected activity', 'Everything the crawler has collected, newest first.']
+  };
   function compose() {
     if (composing) return; composing = true;
-    const overview = destination === 'overview';
+    const page = PAGES[destination], overview = destination === 'overview', markets = destination === 'markets';
     document.body.dataset.destination = destination;
-    if (overview) {
+    document.body.dataset.inspector = inspector;
+    if (page) {
       $('tab-intelligence').hidden = false;
       for (const id of ['tab-picks', 'tab-radar', 'tab-news', 'tab-feed']) $(id).hidden = false;
-      renderPicks(); renderNews(true);
-      if ($('overview-radar').open) renderRadar();
-      if ($('overview-stream').open) renderStream();
-      $('show-more-reporting').hidden = newsPosts.length <= 6;
+      const heading = $('tab-intelligence').querySelector('.research-heading');
+      heading.querySelector('.eyebrow').textContent = page[0];
+      heading.querySelector('h1').innerHTML = page[1] + '<span class="accent">.</span>';
+      heading.querySelector('p').textContent = page[2];
+      if (markets) { renderPicks(); if ($('overview-radar').open) renderRadar(); }
+      if (destination === 'reporting') renderNews(true);
+      if (destination === 'activity') { $('overview-stream').open = true; renderStream(); }
     }
     $('research-detail').hidden = !overview || inspector !== 'signal';
-    $('detail').hidden = !overview || inspector !== 'asset';
+    $('detail').hidden = !(overview || markets) || inspector !== 'asset';
     $('assistant-panel').hidden = !overview || inspector !== 'chat';
     $('tab-mentions').hidden = false;
-    if (overview && inspector === 'asset') { renderDetail(); renderMentions(); }
+    if ((overview || markets) && inspector === 'asset') { renderDetail(); renderMentions(); }
     if (destination === 'operations') renderOperations();
-    if (destination === 'watchlist') renderServerWorkspace();
+    if (destination === 'watchlist') { renderServerWorkspace(); window.CrawlerNetwork?.renderPanels(); }
     simplifyInspector(); renderServerDossier(); renderStatus();
     $('show-more-signals').hidden = $('signal-list').children.length < window.CrawlerSignalLimit;
     composing = false;
@@ -174,7 +184,7 @@
     }
     const h = api.health, jobs = api.operations?.jobs || [], sources = api.sources;
     target.innerHTML = `<div class="system-metrics"><div><span>Collection</span><b>${h.workers} service threads</b></div><div><span>Evidence store</span><b>${esc(h.storage)}</b></div><div><span>Research AI</span><b>${h.ai.configured ? esc(h.ai.model) : 'Not configured'}</b></div><div><span>Job queue</span><b>${h.queued} queued · ${h.deadLetters} failed</b></div></div>
-      <section class="research-box"><div class="hub-section-heading"><h2>Server sources</h2><button class="btn sm" id="configure-connector">Add connector</button></div><div class="source-list">${sources.map(s => `<article><div><b>${esc(s.name)}</b><p class="dim sm">${esc(s.kind)} · ${esc(s.language || 'unknown')} · ${esc(s.family || s.name)}${s.geographyVerified ? ' · publisher geography reviewed' : ''}</p><small class="${s.health?.ok ? 'up' : 'dim'}">${s.enabled ? s.health ? s.health.ok ? 'Healthy · ' + date(s.health.checkedAt) : esc(s.health.error) : 'Awaiting first poll' : 'Paused'}</small></div><div class="source-actions"><button class="btn sm" data-edit-connector="${esc(s.id)}">Edit</button><button class="btn sm" data-server-toggle-source="${esc(s.id)}">${s.enabled ? 'Pause' : 'Enable'}</button>${s.enabled ? `<button class="btn sm" data-poll-source="${esc(s.id)}">Poll now</button>` : ''}</div></article>`).join('')}</div></section>
+      <section class="research-box"><div class="hub-section-heading"><h2>Server sources</h2><button class="btn sm" data-open-source-directory>Browse all sources</button><button class="btn sm" id="configure-connector">Add connector</button></div><div class="source-list">${sources.slice(0, 8).map(s => `<article><div><b>${esc(s.name)}</b><p class="dim sm">${esc(s.kind)} · ${esc(s.language || 'unknown')} · ${esc(s.family || s.name)}${s.geographyVerified ? ' · publisher geography reviewed' : ''}</p><small class="${s.health?.ok ? 'up' : 'dim'}">${s.enabled ? s.health ? s.health.ok ? 'Healthy · ' + date(s.health.checkedAt) : esc(s.health.error) : 'Awaiting first poll' : 'Paused'}</small></div><div class="source-actions"><button class="btn sm" data-edit-connector="${esc(s.id)}">Edit</button><button class="btn sm" data-server-toggle-source="${esc(s.id)}">${s.enabled ? 'Pause' : 'Enable'}</button>${s.enabled ? `<button class="btn sm" data-poll-source="${esc(s.id)}">Poll now</button>` : ''}</div></article>`).join('')}</div></section>
       <div class="tool-grid"><button class="research-box tool-card" id="import-document"><b>Import evidence</b><span>Text, permitted documents, PDF, or media provenance.</span></button><button class="research-box tool-card" id="historical-replay"><b>Historical replay</b><span>Inspect the records and reviews available at a past time.</span></button><button class="research-box tool-card" id="show-measurements"><b>Quantitative signals</b><span>Namespaced assets, stale-data checks, and anomalies.</span></button><button class="research-box tool-card" id="show-audit"><b>Audit & integrity</b><span>${api.operations?.auditIntegrity.valid ? 'Hash chain verified' : 'Integrity check requires attention'} · ${api.operations?.auditIntegrity.entries || 0} entries.</span></button></div>
       <details class="research-box"><summary>Worker queue & recovery</summary>${jobs.slice(0, 30).map(j => `<div class="queue-row"><span><b>${esc(j.kind)}</b> · ${esc(j.state)} · attempt ${j.attempts}<small>${esc(j.last_error || '')}</small></span>${j.state === 'dead' ? `<button class="btn sm" data-retry-job="${esc(j.id)}">Retry</button>` : ''}</div>`).join('') || '<p class="dim sm">No jobs yet.</p>'}</details>
       <details class="research-box"><summary>Connected services & permissions</summary><p class="dim sm">Raw storage: ${esc(h.objects)}. Automatic AI enrichment: ${h.ai.automaticAnalysis ? 'enabled' : 'disabled'}. Source text remains untrusted. High-consequence claims need additional review. Server access uses a same-origin session; remote hosting requires an owner token and HTTPS.</p><p class="dim sm">A provider must be configured and licensed for its intended use. Generic JSON connectors can supply institutional, options, exchange, or chain data using server-held environment credentials. Tickernames alone are not used as asset identities.</p></details>`;
@@ -202,7 +212,7 @@
     if (!b) return;
     try {
       if (b.dataset.destination) navigate(b.dataset.destination);
-      if (b.dataset.jump) { navigate('overview'); $(b.dataset.jump).scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      if (b.dataset.jump) navigate({ 'overview-markets': 'markets', 'overview-news': 'reporting' }[b.dataset.jump] || 'overview');
       if (b.id === 'focus-research') focusResearch();
       if (b.id === 'show-more-signals') { window.CrawlerSignalLimit += 12; window.IntelligenceUI.render('intelligence', true); }
       if (b.id === 'show-more-reporting') { const expanded = $('overview-news').classList.toggle('reporting-expanded'); b.textContent = expanded ? 'Show fewer reports' : 'Show more reporting'; }
@@ -252,13 +262,13 @@
     } catch (error) { if (feedback) { feedback.textContent = error.message; feedback.classList.add('error'); } }
     finally { if (submit?.isConnected) submit.disabled = false; }
   }
-  window.CrawlerHub = { navigate, compose, navigateToModule(name) {
+  window.CrawlerHub = { navigate, compose, editSource(source) { showTool('Edit connector', connectorForm(source)); }, navigateToModule(name) {
     if (name === 'sources' || name === 'registry') return navigate('operations');
     if (name === 'workspace') return navigate('watchlist');
+    if (name === 'news') return navigate('reporting');
+    if (name === 'picks') return navigate('markets');
+    if (name === 'mentions') { navigate('markets'); inspector = 'asset'; $('asset-mentions').open = true; renderMentions(); compose(); $('asset-mentions').scrollIntoView({ behavior: 'smooth' }); return; }
     navigate('overview');
-    if (name === 'mentions') { inspector = 'asset'; $('asset-mentions').open = true; renderMentions(); compose(); $('asset-mentions').scrollIntoView({ behavior: 'smooth' }); }
-    if (name === 'news') $('overview-news').scrollIntoView({ behavior: 'smooth' });
-    if (name === 'picks') $('overview-markets').scrollIntoView({ behavior: 'smooth' });
   } };
   window.IntelligenceUI.render = (...args) => { originalRender(...args); if ($('assistant-panel')) compose(); };
   mount();

@@ -81,6 +81,7 @@ def _documents(documents):
             continue
         normalized = {"id": identity, "version": version, "title": str(document.get("title") or "Original source")[:300],
                       "text": text[:6500], "url": url, "source": str(document.get("source") or "Original source")[:150],
+                      "contentRole": document.get("contentRole", "reporting"),
                       "publishedAt": document.get("publishedAt"), "entities": document.get("entities") if isinstance(document.get("entities"), list) else []}
         if identity in selected and any(selected[identity][field] != normalized[field] for field in ("version", "text", "url")):
             ambiguous.add(identity)
@@ -252,6 +253,7 @@ def research_topic(ai, query, documents, previous=None):
                  "previousSubjects": [item["name"][:150] for item in subjects[:18] if isinstance(item, dict) and isinstance(item.get("name"), str)]}
     instructions = (
         "Write useful, readable market research about the requested topic using only the supplied original source records. "
+        "Respect contentRole: attribute commentary as opinion, survey findings with their population and methodology limits, and publisher claims as reported. Feed summaries are not full articles and news headlines are not market quotes. "
         "Return a concise summary, the developments or drivers to monitor, source-supported risks or contradictory reports, "
         "and relevant companies, markets, and financial institutions named in the original text. Subjects are research watch "
         "subjects, not qualified assets or investments; do not require market quotes, SEC identity, or portfolio entry gates. "
@@ -275,7 +277,7 @@ def research_topic(ai, query, documents, previous=None):
     )
     try:
         result = ai.structured("market_topic_research", SCHEMA, instructions, {"topic": query.strip(), "previous": prior,
-                    "records": [{key: document[key] for key in ("id", "version", "title", "text", "url", "source", "publishedAt")} for document in originals]})
+                    "records": [{key: document[key] for key in ("id", "version", "title", "text", "url", "source", "publishedAt", "contentRole")} for document in originals]})
         if not isinstance(result, dict) or set(result) != set(SCHEMA["properties"]) or any(not isinstance(result[field], list) for field in SCHEMA["properties"]):
             raise ValueError("Invalid market research schema")
     except Exception as error:

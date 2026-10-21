@@ -48,10 +48,11 @@ function feedItems(doc) {
   return [...doc.querySelectorAll('item, entry')].map(i => {
     const t = s => i.querySelector(s)?.textContent || '';
     const link = i.querySelector('link')?.getAttribute('href') || t('link');
-    return { title: t('title'), desc: t('description') || t('summary') || t('content'), link: link.trim(), date: t('pubDate') || t('published') || t('updated') };
+    const media = [...i.getElementsByTagName('media:content'), ...i.getElementsByTagName('media:thumbnail'), ...i.getElementsByTagName('enclosure')].filter(n => !n.getAttribute('type') || /^image/.test(n.getAttribute('type'))).map(n => n.getAttribute('url')).find(Boolean) || /<img[^>]+src=["'](https:[^"']+)/i.exec(t('description') || t('content'))?.[1] || '';
+    return { title: t('title'), image: media, desc: t('description') || t('summary') || t('content'), link: link.trim(), date: t('pubDate') || t('published') || t('updated') };
   });
 }
-const outletPost = (name, tier, it) => { const text = it.title + ' ' + stripHTML(it.desc).slice(0, 300); return { id: 'o_' + it.link, src: 'News', outlet: true, listed: true, tier, ts: Date.parse(it.date) || Date.now(), title: it.title, text, url: it.link, sub: name, language: 'en', publishedEstimated: !Date.parse(it.date), topic: topicSyms(text), raw: { title: it.title, description: it.desc, link: it.link, publicationDate: it.date } }; };
+const outletPost = (name, tier, it) => { const text = it.title + ' ' + stripHTML(it.desc).slice(0, 300); return { id: 'o_' + it.link, src: 'News', outlet: true, listed: true, tier, ts: Date.parse(it.date) || Date.now(), title: it.title, image: it.image, text, url: it.link, sub: name, language: 'en', publishedEstimated: !Date.parse(it.date), topic: topicSyms(text), raw: { title: it.title, description: it.desc, link: it.link, publicationDate: it.date } }; };
 let outPtr = 0, gnTick = 0;
 const BATCH = 10;
 job('Major outlets', async () => {

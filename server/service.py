@@ -37,6 +37,8 @@ class ResearchService:
         self.stop_event, self.lock = threading.Event(), threading.RLock()
         self.threads = []
         self.managed_children = set()
+        self._poll_locks = {}
+        self._event_cache, self._event_cache_at = {}, 0
         self.started_at = now_ms()
         self.last_write = max([d.get("updatedAt", 0) for d in self.db.latest("document", 1)] or [0])
         self.auto_ai = os.getenv("CRAWLER_AUTO_AI", "false").lower() == "true"
@@ -46,9 +48,25 @@ class ResearchService:
         self.network_research = ResearchNetwork(self)
         self.accounts = AccountAuth(self, directory)
         if seed:
+            from .source_catalog import URL_REPAIRS
+            registered_urls = {s["url"] for s in self.db.list("source")}
             for source in DEFAULT_SOURCES:
-                if not self.db.get("source", source["id"]):
-                    self.add_source({**source, "permissions": "Feed links and supplied summaries only; review provider terms for retention and commercial use.", "allowFullText": False})
+                existing = self.db.get("source", source["id"])
+                if not existing:
+                    if source["url"] not in registered_urls:
+                        self.add_source({**source, "permissions": "Feed links and supplied summaries only; review provider terms for retention and commercial use.", "allowFullText": False})
+                        registered_urls.add(source["url"])
+                elif existing.get("catalogVersion", 0) < source["catalogVersion"]:
+                    repair = URL_REPAIRS.get(source["id"])
+                    if repair and existing["url"] == repair[0] and repair[1] not in registered_urls:
+                        existing.update(url=repair[1], httpCache={}, nextPollAt=0)
+                        registered_urls.add(repair[1])
+                    if existing["url"] == source["url"]:
+                        for key in ("contentRole", "purpose", "catalogVersion"):
+                            existing[key] = source[key]
+                        if source.get("config", {}).get("httpsArticleHosts"):
+                            existing["config"] = {**existing.get("config", {}), **source["config"]}
+                        self.db.put("source", existing["id"], existing)
 
     def health(self):
         return {"service": "trend-crawler", "version": 2, "startedAt": self.started_at, "workers": sum(t.is_alive() for t in self.threads),
@@ -73,7 +91,11 @@ class ResearchService:
                 if not (other["kind"] == values.get("kind") == "sec" and other.get("config", {}).get("ticker") != values.get("config", {}).get("ticker")):
                     raise ValueError("This source URL is already registered")
         existing = self.db.get("source", values.get("id", "")) or {}
-        source = {**existing, **{key: values[key] for key in ("url", "kind", "family", "language", "region", "category", "permissions", "allowFullText", "geographyVerified", "config", "credentialEnv", "credentialHeader", "credentialPrefix") if key in values},
+        role = values.get("contentRole", existing.get("contentRole", "reporting"))
+        from .source_catalog import PURPOSES
+        if role not in PURPOSES: raise ValueError("Choose a supported source content role")
+        source = {**existing, **{key: values[key] for key in ("url", "kind", "family", "language", "region", "category", "permissions", "allowFullText", "geographyVerified", "config", "credentialEnv", "credentialHeader", "credentialPrefix", "purpose", "catalogVersion") if key in values},
+                  "contentRole": role,
                   "id": existing.get("id") or values.get("id") or identifier("source"), "name": name,
                   "tier": values.get("tier", existing.get("tier", "regional")), "enabled": bool(values.get("enabled", existing.get("enabled", False))),
                   "interval": max(60000, min(86400000, int(values.get("interval", existing.get("interval", 300000))))),
@@ -100,7 +122,10 @@ class ResearchService:
     def _event(self, title, text, published, entities, embedding=None, exclude_id=None, default_id=None):
         best, score = None, .68
         ids = {entity["id"] for entity in entities if entity["type"] != "unresolved"}
-        for doc in self.db.latest("document", 600):
+        if time.monotonic() - self._event_cache_at > 5:
+            self._event_cache = {d["id"]: d for d in self.db.latest("document", 600)}
+            self._event_cache_at = time.monotonic()
+        for doc in self._event_cache.values():
             if doc["id"] == exclude_id:
                 continue
             if abs(doc["publishedAt"] - published) > 3 * a.DAY:
@@ -140,6 +165,7 @@ class ResearchService:
             self.last_write = max(at, self.last_write + 1)
             document = {"id": document_id, "title": title, "text": text, "url": url, "sourceId": source["id"], "source": source["name"],
                         "family": source.get("family", source["name"]), "tier": source.get("tier", "regional"), "language": record.get("language") or source.get("language", "unknown"),
+                        "contentRole": source.get("contentRole", "reporting"),
                         "publisherRegion": source.get("region", ""), "publisherGeographyVerified": bool(source.get("geographyVerified")), "regions": a.regions(text),
                         "categories": sorted(set(a.categories(text) + ([source["category"]] if source.get("category") else []))), "entities": entity_list,
                         "publishedAt": published, "publishedEstimated": bool(record.get("publishedEstimated", record.get("publishedAt") is None)),
@@ -151,6 +177,9 @@ class ResearchService:
             for field in ("companyId", "filingType", "accessionNumber", "policyRecord", "sourceUpdatedAt"):
                 if field in record:
                     document[field] = record[field]
+            image = record.get("image")
+            if isinstance(image, str) and image.startswith("https://") and len(image) <= 2000:
+                document["image"] = image
             self.db.version(document, object_key)
             return self._index_document(document)
 
@@ -188,6 +217,8 @@ class ResearchService:
         self.db.enqueue("analyze", {"eventId": event["id"]}, "analyze:" + event["id"] + ":" + str(at // 10000))
         document["indexedVersion"] = document["version"]
         self.db.put("document", document_id, document, at=document["updatedAt"])
+        self._event_cache[document_id] = document
+        while len(self._event_cache) > 600: self._event_cache.pop(next(iter(self._event_cache)))
         self.investments.queue("Source revision" if document["version"] > 1 else "New source evidence", document_id)
         self.topics.evidence_changed(document_id=document_id, source_id=document["sourceId"])
         return document
@@ -661,7 +692,51 @@ class ResearchService:
         record["spans"] = [span for span in spans if span["end"] >= at - 366 * a.DAY]
         self.db.put("setting", "coverage", record)
 
+    def queue_source_poll(self, source_id, manual=False):
+        with self.lock:
+            source = self.db.get("source", source_id)
+            if not source or not source.get("enabled"):
+                raise ValueError("Enable the registered source before polling it")
+            pending = self.db.get_job(source.get("inFlight", ""))
+            if pending and pending["state"] in {"queued", "running"}:
+                return pending["id"]
+            delay = max(0, (source.get("health", {}).get("retryAt", 0) - now_ms()) / 1000)
+            job_id = self.db.enqueue("poll", {"sourceId": source_id}, delay=delay)
+            source.update(inFlight=job_id, nextPollAt=max(now_ms() + source["interval"], now_ms() + int(delay * 1000)))
+            self.db.put("source", source_id, source)
+            return job_id
+
+    def source_items(self, source_id):
+        if not self.db.get("source", source_id): raise ValueError("Source not found")
+        kind = "feedItem:" + source_id
+        return {"items": self.db.latest(kind, 12), "total": self.db.count(kind)}
+
     def poll_source(self, source_id):
+        with self.lock:
+            lock = self._poll_locks.setdefault(source_id, threading.Lock())
+        if not lock.acquire(blocking=False): return
+        started = time.monotonic()
+        try:
+            return self._poll_source(source_id, started)
+        except Exception as exc:
+            source = self.db.get("source", source_id)
+            if source:
+                health = source.get("health", {})
+                failures = health.get("consecutiveFailures", 0) + 1
+                delay = max(getattr(exc, "retry_after", 0) or 0, min(3600, source["interval"] / 1000 * 2 ** min(failures, 6)))
+                if isinstance(exc, ConnectorError): exc.retry_after = delay
+                health.update(ok=False, status="unavailable", checkedAt=now_ms(), checks=health.get("checks", 0) + 1,
+                              consecutiveFailures=failures, retryAt=now_ms() + int(delay * 1000),
+                              durationMs=round((time.monotonic() - started) * 1000),
+                              error=str(exc)[:300] if isinstance(exc, (ConnectorError, ValueError)) else "Source collection failed")
+                source.update(health=health, nextPollAt=health["retryAt"])
+                self.db.put("source", source_id, source)
+                self.db.put("healthSample", identifier("health"), {"sourceId": source_id, "checkedAt": health["checkedAt"], "ok": False, "interval": source["interval"]})
+            raise
+        finally:
+            lock.release()
+
+    def _poll_source(self, source_id, started):
         source = self.db.get("source", source_id)
         if not source or not source.get("enabled"):
             return
@@ -673,22 +748,65 @@ class ResearchService:
             result = collect_financial_source(source, self.network)
         else:
             result = collect(source, self.network)
-        raw_key = self.objects.put(result["raw"])
+        raw_key = self.objects.put(result["raw"]) if result.get("raw") else source.get("health", {}).get("rawObjectKey")
         self.investments.accept_assets(result.get("assets", []), source)
-        before = self.db.count("document")
+        counts = {"added": 0, "revised": 0, "unchanged": 0, "rejected": result.get("feedStats", {}).get("rejected", 0), "leads": 0, "observations": 0}
+        role = source.get("contentRole", "reporting")
+        receipt_kind = "feedItem:" + source_id
         for record in result.get("documents", []):
-            self.ingest(source, record)
+            try:
+                url = a.canonical_url(record.get("url", ""))
+                if not url.startswith("https://") or not record.get("title") or not record.get("text"):
+                    raise ValueError("Unusable feed item")
+                if timestamp(record.get("publishedAt"), now_ms()) > now_ms() + 120000:
+                    raise ValueError("Publication date is in the future")
+                receipt_id = a.digest(url)[:32]
+                previous = self.db.get(receipt_kind, receipt_id)
+                fingerprint = a.digest(dumps(record))
+                if previous and previous.get("fingerprint") == fingerprint:
+                    counts["unchanged"] += 1
+                    continue
+                is_lead = role in {"discovery", "community"}
+                doc_id = "document-" + receipt_id
+                old = self.db.get("document", doc_id) if not is_lead else None
+                document = self.ingest(source, record) if not is_lead else None
+                if is_lead: counts["leads"] += 1
+                elif not old: counts["added"] += 1
+                elif document["version"] != old["version"]: counts["revised"] += 1
+                else: counts["unchanged"] += 1
+                receipt = {"id": receipt_id, "sourceId": source_id, "title": record["title"][:1500],
+                    "url": url, "publishedAt": record.get("publishedAt"), "collectedAt": now_ms(), "contentRole": role,
+                    "documentId": document["id"] if document else None, "discoveryOnly": is_lead,
+                    "summary": strip_html(record["text"])[:1000], "fingerprint": fingerprint}
+                self.db.put(receipt_kind, receipt_id, receipt)
+                if is_lead: self.db.put("feedLead", receipt_id, receipt)
+            except ValueError:
+                counts["rejected"] += 1
         for observation in result.get("observations", []):
             self.observation(source, observation)
-        added = self.db.count("document") - before
+            counts["observations"] += 1
+        added = counts["added"] + counts["revised"] + counts["leads"] + counts["observations"]
         source = self.db.get("source", source_id)
         health = source.get("health", {"checks": 0, "successes": 0})
-        health.update(ok=True, checkedAt=now_ms(), lastSuccess=now_ms(), checks=health.get("checks", 0) + 1, successes=health.get("successes", 0) + 1, rawObjectKey=raw_key, error="")
+        received = len(result.get("documents", []))
+        total = self.db.count(receipt_kind)
+        status = "not-modified" if result.get("notModified") else "collecting" if added else "no-new-items" if received else "empty"
+        health.update(ok=True, status=status, checkedAt=now_ms(), lastSuccess=now_ms(), checks=health.get("checks", 0) + 1,
+                      successes=health.get("successes", 0) + 1, rawObjectKey=raw_key, error="", consecutiveFailures=0, retryAt=0,
+                      received=received, totalItems=total, lastPoll=counts, durationMs=round((time.monotonic() - started) * 1000),
+                      bytes=len(result.get("raw", b"")), resolvedUrl=result.get("resolvedUrl", source["url"]),
+                      warning=("No usable entries returned" if status == "empty" else "Some feed entries were rejected" if counts["rejected"] else ""))
+        metadata = result.get("metadata", {})
+        # A changed response without validators invalidates the previous cache.
+        if not result.get("notModified"):
+            source["httpCache"] = {"url": source["url"], **{key: metadata[key] for key in ("etag", "last-modified") if metadata.get(key)}}
         self.db.put("healthSample", identifier("health"), {"sourceId": source_id, "checkedAt": health["checkedAt"], "ok": True, "interval": source["interval"]})
-        source.update(health=health, nextPollAt=now_ms() + (max(60000, source["interval"] // 2) if added > 15 else source["interval"] if added else min(86400000, max(source["interval"], min(3600000, source["interval"] * 2)))))
+        source.update(health=health, nextPollAt=now_ms() + (source["interval"] if added else min(86400000, max(source["interval"], min(3600000, source["interval"] * 2)))))
         self.db.put("source", source_id, source)
-        self.investments.queue("Provider collection completed", source_id)
-        self.topics.evidence_changed(source_id=source_id)
+        if counts["observations"] or result.get("assets"):
+            self.investments.queue("Provider collection completed", source_id)
+        if added: self.topics.evidence_changed(source_id=source_id)
+        return health
 
     def run_job(self, job):
         payload = job["payload"]
@@ -728,10 +846,12 @@ class ResearchService:
                 # A database outage leaves the last lease recoverable.
                 continue
 
-    def worker(self):
+    def worker(self, lane="all"):
+        interactive = ("topic-research", "network-research", "network-index", "investigate")
         while not self.stop_event.is_set():
             try:
-                job = self.db.claim_job()
+                job = self.db.claim_job(kinds=interactive if lane == "interactive" else None,
+                                        exclude_kinds=interactive if lane == "collection" else None)
             except Exception:
                 self.stop_event.wait(2)
                 continue
@@ -753,14 +873,6 @@ class ResearchService:
                     # A lost database connection leaves the lease recoverable.
                     self.stop_event.wait(2)
                     continue
-                if job["kind"] == "poll":
-                    source = self.db.get("source", job["payload"]["sourceId"])
-                    if source:
-                        health = source.get("health", {})
-                        health.update(ok=False, checkedAt=now_ms(), checks=health.get("checks", 0) + 1, error=message)
-                        self.db.put("healthSample", identifier("health"), {"sourceId": source["id"], "checkedAt": health["checkedAt"], "ok": False, "interval": source["interval"]})
-                        source.update(health=health, nextPollAt=now_ms() + min(3600000, source["interval"] * 2 ** job["attempts"]))
-                        self.db.put("source", source["id"], source)
             finally:
                 finished.set()
                 lease.join(timeout=.2)
@@ -776,12 +888,7 @@ class ResearchService:
                 for source in self.db.list("source"):
                     if not source.get("enabled") or source.get("nextPollAt", 0) > at:
                         continue
-                    pending = self.db.get_job(source.get("inFlight", ""))
-                    if pending and pending["state"] in {"queued", "running"}:
-                        continue
-                    source["inFlight"] = self.db.enqueue("poll", {"sourceId": source["id"]}, "poll:" + source["id"] + ":" + str(at // 1000))
-                    source["nextPollAt"] = at + source["interval"]
-                    self.db.put("source", source["id"], source)
+                    self.queue_source_poll(source["id"])
                 for schedule in self.db.list("schedule"):
                     if schedule["enabled"] and schedule["nextRunAt"] <= at:
                         self.db.enqueue("brief", {"scheduleId": schedule["id"]}, "brief:" + schedule["id"] + ":" + str(schedule["nextRunAt"]))
@@ -811,8 +918,10 @@ class ResearchService:
             self.stop_event.wait(5)
 
     def start(self, workers=2):
-        for index in range(max(1, min(4, workers))):
-            thread = threading.Thread(target=self.worker, name="crawler-worker-" + str(index), daemon=True)
+        count = max(1, min(4, workers))
+        for index in range(count):
+            lane = "all" if count == 1 else "interactive" if index == 0 else "collection"
+            thread = threading.Thread(target=self.worker, args=(lane,), name="crawler-worker-" + str(index), daemon=True)
             thread.start()
             self.threads.append(thread)
         scheduler = threading.Thread(target=self.scheduler, name="crawler-scheduler", daemon=True)

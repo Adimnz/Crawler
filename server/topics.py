@@ -102,7 +102,7 @@ class TopicResearch:
         return item
 
     def list(self):
-        return self.db.latest("topicPortfolio", 200)
+        return [t for t in self.db.latest("topicPortfolio", 200) if not t.get("embedded")]
 
     def create(self, query):
         values = query if isinstance(query, dict) else {"query": query}
@@ -122,7 +122,7 @@ class TopicResearch:
                     "qualifiedCount": 0, "candidateCount": 0, "questions": [], "whatChanged": [], "watchSubjects": [], "marketResearch": None,
                     "manualAiRequest": {"token": identifier("manual-research"), "requestedAt": at},
                     "limitations": ["Research is queued. Assets appear only when collected source records support a topic match."],
-                    "purpose": _PURPOSE}
+                    "purpose": _PURPOSE, "embedded": values.get("embedded") is True}
             self.db.put("topicPortfolio", topic_id, item)
             item["jobId"] = self.db.enqueue("topic-research", {"topicId": topic_id}, "topic-initial:" + topic_id)
             self.db.put("topicPortfolio", topic_id, item)
@@ -303,6 +303,9 @@ class TopicResearch:
         try:
             result = self.s.ai.discover_topic(item["query"], item.get("plan", {}).get("searchTerms", []))
             candidates = result.get("sources", []) if isinstance(result, dict) else result
+            feed_leads = [lead for lead in self.db.latest("feedLead", 500)
+                          if lead.get("contentRole") == "discovery" and self._match({**lead, "text": lead.get("summary", "")}, item)["matches"]][:3]
+            candidates = feed_leads + (candidates if isinstance(candidates, list) else [])
             seen = set()
             for candidate in (candidates if isinstance(candidates, list) else [])[:12]:
                 if not isinstance(candidate, dict): continue
