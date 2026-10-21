@@ -50,6 +50,7 @@ job('Bitcointalk', async () => {
 }, 90000);
 let twitchWS, twitchN = 0;
 function connectTwitch() {
+  if (window.CrawlerServer?.offline) return;
   let ch = []; try { ch = JSON.parse(localStorage.getItem('twitchCh') || '[]'); } catch (e) {}
   if (twitchWS) { twitchWS.onclose = null; twitchWS.close(); twitchWS = null; }
   if (!ch.length) return;
@@ -60,13 +61,22 @@ function connectTwitch() {
     const m = line.match(/^:(\w+)!.* PRIVMSG #(\w+) :(.*)$/); if (!m) return;
     addPost({ id: 'tw_' + ++twitchN, src: 'Twitch', ts: Date.now(), text: m[3], url: 'https://www.twitch.tv/' + m[2], sub: '#' + m[2] + ' ' + m[1] });
   });
-  w.onclose = () => { if (twitchWS !== w) return; setStatus('Twitch chat', false, 'reconnecting'); setTimeout(connectTwitch, 5000); };
+  w.onclose = () => { if (twitchWS !== w) return; setStatus('Twitch chat', false, 'reconnecting'); if (!window.CrawlerServer?.offline) setTimeout(connectTwitch, 5000); };
 }
 $('twbtn').onclick = () => {
   const v = prompt('Live Twitch channels to listen to (comma separated, finance/crypto streamers you pick):', '');
   if (v === null) return;
   try { localStorage.setItem('twitchCh', JSON.stringify(v.split(',').map(s => s.trim().toLowerCase()).filter(s => /^[a-z0-9_]{3,25}$/.test(s)))); } catch (e) {}
   connectTwitch();
+window.addEventListener('crawler:server-state', () => {
+  if (window.CrawlerServer?.offline && twitchWS) {
+    const current = twitchWS;
+    twitchWS = null;
+    current.onclose = null;
+    current.close();
+    setStatus('Twitch chat', false, 'Research server stopped');
+  }
+});
 };
 connectTwitch();
 
