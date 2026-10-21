@@ -28,8 +28,6 @@ On local hardware, adjust `CRAWLER_WORKERS`, `CRAWLER_HTTP_CONNECTIONS`, and `CR
 
 Connected browser tabs display a prominent **server offline** notice and stop live API refreshes once the server is unavailable. Browsers intentionally do not allow a server to forcibly close tabs that it did not open programmatically; external applications and operating-system processes are not killed. Closing the browser window alone does **not** stop an intentionally unattended research server.
 
-**Security:** An earlier commit included a tracked `API KEY.txt` file containing a possible secret. The file has been removed from the current review branch and is now ignored, but it remains in existing Git history. Rotate any credentials that were stored in it and separately clean affected Git history if required. Never store API keys in the repository.
-
 ## Search first
 
 The default page is a centered search bar beneath **“Where do I start”**. Enter a topic, industry, company, or idea. Results open an interactive **Research Observation Board**, followed by the source-linked market brief, drivers, risks, and connected **companies, markets, and financial institutions**. Click **Market brief** to jump directly to the report. **Your topics** reopens previous searches; a fresh visit starts with the clean search screen.
