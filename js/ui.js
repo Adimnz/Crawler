@@ -142,7 +142,7 @@ function renderMovers() {
 }
 // One mini-chart fetch at a time, only while the tab is visible.
 setInterval(async () => {
-  if (document.hidden) return;
+  if (window.CrawlerServer?.offline || document.hidden) return;
   for (const x of moversNow) {
     const k = x.type + ':' + x.sym, e = mini.get(k);
     if (e && Date.now() - e.t < (x.type === 'crypto' ? 90000 : 3e5)) continue;
@@ -153,6 +153,7 @@ setInterval(async () => {
 
 /* ---------------- Main loop: heavy work is throttled and only runs for what is visible ---------------- */
 function renderAll() {
+  if (window.CrawlerServer?.offline) return;
   if (window.CrawlerHub && document.body.dataset.experience && document.body.dataset.experience !== 'workspace') return;
   const now = Date.now();
   if (now - lastBuild > 3000) {
@@ -173,7 +174,7 @@ function renderAll() {
   if (!['intelligence', 'research', 'workspace', 'registry'].includes(tab)) renderDetail();
   renderMovers();
 }
-(function loop() { if (!document.hidden) renderAll(); setTimeout(loop, 2500); })();
+(function loop() { if (!document.hidden && !window.CrawlerServer?.offline) renderAll(); setTimeout(loop, 2500); })();
 
 /* ---------------- Events ---------------- */
 $('tabs').onclick = e => {

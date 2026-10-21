@@ -36,6 +36,7 @@ class ResearchService:
         self.ai = AI(self.network)
         self.stop_event, self.lock = threading.Event(), threading.RLock()
         self.threads = []
+        self.managed_children = set()
         self.started_at = now_ms()
         self.last_write = max([d.get("updatedAt", 0) for d in self.db.latest("document", 1)] or [0])
         self.auto_ai = os.getenv("CRAWLER_AUTO_AI", "false").lower() == "true"
@@ -596,9 +597,22 @@ class ResearchService:
                     handle.write(data)
                     filename = handle.name
                 try:
-                    response = subprocess.run([tool, filename, "--json"], capture_output=True, timeout=20, check=False)
-                    provenance["credentials"] = json.loads(response.stdout.decode()) if response.returncode == 0 else {"status": "Validator could not validate this asset"}
-                    provenance["status"] = "C2PA validator inspected; content truth is not established"
+                    with subprocess.Popen([tool, filename, "--json"], stdout=subprocess.PIPE, stderr=subprocess.PIPE) as validator:
+                        with self.lock:
+                            self.managed_children.add(validator)
+                        try:
+                            output, _ = validator.communicate(timeout=20)
+                        except subprocess.TimeoutExpired:
+                            validator.kill()
+                            validator.communicate()
+                            raise ValueError("Media validator timed out")
+                        finally:
+                            with self.lock:
+                                self.managed_children.discard(validator)
+                        if self.stop_event.is_set():
+                            raise ValueError("Media validation interrupted by server shutdown")
+                        provenance["credentials"] = json.loads(output.decode()) if validator.returncode == 0 else {"status": "Validator could not validate this asset"}
+                        provenance["status"] = "C2PA validator inspected; content truth is not established"
                 finally:
                     Path(filename).unlink(missing_ok=True)
             provenance["objectKey"] = self.objects.put(data)
@@ -794,10 +808,10 @@ class ResearchService:
                     self.db.put("operation", "scheduler", {"at": at, "error": "Scheduler iteration failed; retrying"})
                 except Exception:
                     pass
-            self.stop_event.wait(1)
+            self.stop_event.wait(5)
 
-    def start(self, workers=3):
-        for index in range(max(1, min(12, workers))):
+    def start(self, workers=2):
+        for index in range(max(1, min(4, workers))):
             thread = threading.Thread(target=self.worker, name="crawler-worker-" + str(index), daemon=True)
             thread.start()
             self.threads.append(thread)
@@ -805,7 +819,26 @@ class ResearchService:
         scheduler.start()
         self.threads.append(scheduler)
 
-    def close(self):
+    def close(self, grace_period=15):
+        """Stop scheduling/claiming jobs and allow active tasks a bounded drain."""
         self.stop_event.set()
+        # A media provenance subprocess belongs to this server; do not orphan it.
+        with self.lock:
+            children = list(self.managed_children)
+        for child in children:
+            if child.poll() is None:
+                try:
+                    child.terminate()
+                except OSError:
+                    pass
+        deadline = time.monotonic() + max(0, grace_period)
         for thread in self.threads:
-            thread.join(timeout=2)
+            if thread is not threading.current_thread():
+                thread.join(timeout=max(0, deadline - time.monotonic()))
+        for child in children:
+            if child.poll() is None:
+                try:
+                    child.kill()
+                except OSError:
+                    pass
+        return [thread.name for thread in self.threads if thread.is_alive()]

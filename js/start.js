@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const api = window.CrawlerServer;
-  let current = null, settings = null, recent = [], loading = false, polling = false, lastSettings = 0, navigationVersion = 0, settingsRequest = null, recentRequest = null;
+  let current = null, settings = null, recent = [], loading = false, polling = false, lastSettings = 0, lastRecent = 0, navigationVersion = 0, settingsRequest = null, recentRequest = null;
   let modelGeneration = 0, modelTimer = null;
   const date = value => value ? new Date(value).toLocaleString() : 'Not yet reviewed';
   const qualified = item => item.qualified === true;
@@ -49,7 +49,7 @@
       }
       const topic = await api.request('topics', { query });
       if (navigation === navigationVersion) { showTopic(topic); window.scrollTo(0, 0); }
-      await loadRecent();
+      await loadRecent(true);
     } catch (error) { if (feedback?.isConnected) feedback.textContent = error.message; }
     finally { loading = false; for (const button of document.querySelectorAll('#start-search-form button, #topic-search-form button')) button.disabled = false; }
   }
@@ -114,9 +114,9 @@
     catch (error) { if ($('topic-feedback')) $('topic-feedback').textContent = error.message; }
     finally { polling = false; }
   }
-  async function loadRecent() {
-    if (!api.connected || recentRequest) return recentRequest;
-    recentRequest = (async () => { try { recent = (await api.request('topics')).topics || []; renderRecentButton(); } catch { /* Retry on the next server-state event. */ } })().finally(() => { recentRequest = null; });
+  async function loadRecent(force = false) {
+    if (!api.connected || recentRequest || !force && Date.now() - lastRecent < 60000) return recentRequest;
+    recentRequest = (async () => { try { recent = (await api.request('topics')).topics || []; lastRecent = Date.now(); renderRecentButton(); } catch { /* Retry after the next polling window. */ } })().finally(() => { recentRequest = null; });
     return recentRequest;
   }
   function renderRecentButton() {
@@ -131,7 +131,7 @@
     document.body.append(button);
   }
   async function loadSettings(force = false) {
-    if (!api.connected || !force && Date.now() - lastSettings < 10000) return;
+    if (!api.connected || !force && Date.now() - lastSettings < 60000) return;
     if (settingsRequest) return settingsRequest;
     settingsRequest = (async () => { try { const next = await api.request('ai/settings', undefined, 10000), changed = JSON.stringify(settings) !== JSON.stringify(next); settings = next; lastSettings = Date.now(); updateConnectionStatus(); if (changed) renderTopic(); } catch { /* The connection dialog reports server availability. */ } })().finally(() => { settingsRequest = null; });
     return settingsRequest;
@@ -249,5 +249,5 @@
   }, true);
   window.addEventListener('crawler:server-state', () => { loadSettings(); loadRecent(); });
   window.CrawlerStart = { showStart, showWorkspace, openTopic, search };
-  setInterval(pollTopic, 4000); loadSettings(); loadRecent();
+  setInterval(pollTopic, 12000); loadSettings(); loadRecent();
 })();

@@ -18,6 +18,18 @@ Keep that process running for unattended collection, monitors, and scheduled bri
 
 The app still works under a plain static server or as a local page with browser-only storage. Server features appear automatically when the research API is available on the same origin. The old `CRAWLER.html` entry point is preserved.
 
+## Runtime limits and stopping the server
+
+The research server runs with **two** background workers by default and caps them at four. HTTP concurrency defaults to eight simultaneous requests (hard limit 32); requests beyond that limit receive a 503 response instead of launching unbounded handler threads. Browser data refreshes are staggered and the observation board slows its polling when research is idle.
+
+On local hardware, adjust `CRAWLER_WORKERS`, `CRAWLER_HTTP_CONNECTIONS`, and `CRAWLER_SHUTDOWN_GRACE_SECONDS` in `.env`; use `--no-workers` to inspect saved research without collection. Performance depends on data volume and enabled feeds; these are limits, not measured guarantees.
+
+**Stop the server:** Choose **Stop server** on the start page or **Stop research server** in the workspace (server owner only), or press Ctrl+C in the Python server terminal. SIGTERM is also handled. A shutdown request immediately stops new background scheduling, closes the HTTP listener, drains active research threads for a bounded grace period, and terminates managed media-validation subprocesses. Research records and queued work remain on disk. An in-flight job that cannot finish during the grace period may be retried after its durable lease expires on a later start; do not treat abrupt termination as guaranteed immediate task cancellation.
+
+Connected browser tabs display a prominent **server offline** notice and stop live API refreshes once the server is unavailable. Browsers intentionally do not allow a server to forcibly close tabs that it did not open programmatically; external applications and operating-system processes are not killed. Closing the browser window alone does **not** stop an intentionally unattended research server.
+
+**Security:** An earlier commit included a tracked `API KEY.txt` file containing a possible secret. The file has been removed from the current review branch and is now ignored, but it remains in existing Git history. Rotate any credentials that were stored in it and separately clean affected Git history if required. Never store API keys in the repository.
+
 ## Search first
 
 The default page is a centered search bar beneath **“Where do I start”**. Enter a topic, industry, company, or idea. Results open an interactive **Research Observation Board**, followed by the source-linked market brief, drivers, risks, and connected **companies, markets, and financial institutions**. Click **Market brief** to jump directly to the report. **Your topics** reopens previous searches; a fresh visit starts with the clean search screen.

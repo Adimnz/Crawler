@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="css/network-board.css">
 </head>
 <body data-experience="start">
-<div class="start-topbar"><button class="start-brand" id="new-topic-search" aria-label="Start a new research search"><span aria-hidden="true">◎</span> Crawler</button><button class="start-ai-button" data-openai-connect><i></i><span>Connect OpenAI</span></button></div>
+<div class="start-topbar"><button class="start-brand" id="new-topic-search" aria-label="Start a new research search"><span aria-hidden="true">◎</span> Crawler</button><button class="crawler-stop-button" data-stop-crawler-server hidden type="button">Stop server</button><button class="start-ai-button" data-openai-connect><i></i><span>Connect OpenAI</span></button></div>
 <main id="start-screen" aria-labelledby="start-heading">
   <div class="start-center">
     <h1 id="start-heading">Where do I start</h1>
@@ -46,7 +46,7 @@
   <button class="rail-link" data-destination="watchlist"><span aria-hidden="true">☆</span>Watchlist<span id="rail-saved-count" class="rail-count">0</span></button>
   <button class="rail-link" data-destination="operations"><span aria-hidden="true">◈</span>Sources &amp; System</button>
   <div class="rail-shortcuts"><div class="rail-label">JUMP TO</div><button data-jump="signal-list">Priority signals <span>↗</span></button><button data-jump="overview-markets">Market context <span>↗</span></button><button data-jump="overview-news">Latest reporting <span>↗</span></button><button id="focus-research">Ask a question <kbd>/</kbd></button></div>
-  <div class="rail-bottom"><span id="backend-state"><i class="dotc"></i>Checking research server</span><small>Evidence before conclusions.</small></div>
+  <div class="rail-bottom"><button class="crawler-stop-button" data-stop-crawler-server hidden type="button">Stop research server</button><span id="backend-state"><i class="dotc"></i>Checking research server</span><small>Evidence before conclusions.</small></div>
 </nav>
 <header class="top">
   <div class="logo"><span class="live"></span>Trend Crawler</div>
