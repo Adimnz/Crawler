@@ -98,8 +98,13 @@ class Network:
         for _ in range(5):
             parsed, addresses = validate_public_url(url)
             with self.lock:
-                delay = max(0, self.host_due.get(parsed.hostname, 0) - time.monotonic())
-                self.host_due[parsed.hostname] = time.monotonic() + delay + .5
+                now = time.monotonic()
+                if len(self.host_due) > 2048:
+                    self.host_due = {host: due for host, due in self.host_due.items() if due > now}
+                    if len(self.host_due) > 2048:
+                        self.host_due.clear()
+                delay = max(0, self.host_due.get(parsed.hostname, 0) - now)
+                self.host_due[parsed.hostname] = now + delay + .5
             if delay:
                 time.sleep(min(delay, 5))
             connection = http.client.HTTPSConnection(parsed.hostname, timeout=90 if parsed.hostname == "api.openai.com" else 20, context=ssl.create_default_context())
@@ -150,7 +155,14 @@ class Network:
                     parser.parse([])
                 else:
                     raise ConnectorError("Cannot establish robots.txt collection permission") from exc
-            self.robots_cache[origin] = (time.time(), parser)
+            with self.lock:
+                if len(self.robots_cache) >= 512:
+                    expired = [host for host, item in self.robots_cache.items() if item[0] < time.time() - 3600]
+                    for host in expired:
+                        self.robots_cache.pop(host, None)
+                    if len(self.robots_cache) >= 512:
+                        self.robots_cache.pop(next(iter(self.robots_cache)))
+                self.robots_cache[origin] = (time.time(), parser)
         return self.robots_cache[origin][1].can_fetch(USER_AGENT, url)
 
     def json(self, url, headers=None, body=None):
