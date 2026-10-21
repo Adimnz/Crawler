@@ -180,7 +180,7 @@
   }
   window.CrawlerServer = {
     request, refresh, pull, probe, dossier, cachedDossier, mutation, serverEvent,
-    get connected() { return connected; }, get health() { return health; }, get session() { return session; }, get sources() { return serverSources; }, get workspace() { return workspace; }, get operations() { return operations; }, get metrics() { return metrics; }, get error() { return lastFailure; },
+    get connected() { return connected; }, get offline() { return everConnected && !connected; }, get stopping() { return shuttingDown; }, get health() { return health; }, get session() { return session; }, get sources() { return serverSources; }, get workspace() { return workspace; }, get operations() { return operations; }, get metrics() { return metrics; }, get error() { return lastFailure; },
     async login(token) { session = await request('login', { token }); connected = !!session.authorized; if (connected) { everConnected = true; shuttingDown = false; } lifecycleUI(); emit(); if (inWorkspace()) { refresh().catch(() => {}); pull().catch(() => {}); } },
     async shutdown() {
       if (!connected || !session?.ownerAuthorized) throw new Error('Only the research server owner can stop it.');
