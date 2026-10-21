@@ -1,0 +1,8 @@
+.env
+data/
+__pycache__/
+*.pyc
+.venv/
+openai-settings.json
+.openai-settings-*.tmp
+test-results/

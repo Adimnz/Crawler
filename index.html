@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crawler · Deep Research Network</title>
+<meta name="description" content="Investigate source-backed corporate relationships on a private, editable observation board.">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/hub.css">
+<link rel="stylesheet" href="css/investment.css">
+<link rel="stylesheet" href="css/start.css">
+<link rel="stylesheet" href="css/network-board.css">
+</head>
+<body data-experience="start">
+<div class="start-topbar"><button class="start-brand" id="new-topic-search" aria-label="Start a new research search"><span aria-hidden="true">◎</span> Crawler</button><button class="start-ai-button" data-openai-connect><i></i><span>Connect OpenAI</span></button></div>
+<main id="start-screen" aria-labelledby="start-heading">
+  <div class="start-center">
+    <h1 id="start-heading">Where do I start</h1>
+    <form id="start-search-form" class="start-search" role="search"><label class="sr-only" for="start-query">Research a topic</label><input id="start-query" name="query" placeholder="A topic, industry, company, or idea…" autocomplete="off" maxlength="500" required><button type="submit" aria-label="Research this topic"><span aria-hidden="true">↗</span></button></form>
+    <p class="start-hint">Choose a topic. Your research builds from there.</p>
+    <p id="start-feedback" class="start-feedback" role="status" aria-live="polite"></p>
+  </div>
+  <button id="open-workspace" class="start-workspace-link">Open workspace <span aria-hidden="true">↗</span></button>
+</main>
+<main id="topic-workspace" hidden aria-label="Topic research portfolio"></main>
+<dialog id="openai-connection-dialog" class="connection-dialog" aria-labelledby="openai-dialog-title">
+  <div class="connection-heading"><div><span class="eyebrow">AUTONOMOUS RESEARCH</span><h2 id="openai-dialog-title">Connect OpenAI</h2></div><button class="connection-close" id="close-openai-connection" data-close-ai aria-label="Close OpenAI settings">×</button></div>
+  <p class="connection-intro">Use OpenAI to research your topic across collected sources and identify companies, markets and financial institutions to watch.</p>
+  <form id="owner-unlock-form" class="stack-form" hidden><label>Research server owner token<input name="ownerToken" type="password" autocomplete="off" required></label><button class="btn primary">Unlock server</button><p role="status"></p></form>
+  <form id="openai-connection-form" class="stack-form">
+    <label>API key<input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Enter your OpenAI API key"></label>
+    <label>Research model<select name="model" required disabled><option value="">Enter your key to load available models</option></select></label>
+    <div class="model-load-row"><button class="text-button" id="load-openai-models" type="button">Load available models</button><span id="openai-model-status" role="status"></span></div>
+    <label class="chk connection-auto"><input name="automaticAnalysis" type="checkbox" checked><span>Keep research running automatically<small>Manual searches use the connected model. Enable this for background AI updates while the server runs. Both use your OpenAI API billing.</small></span></label>
+    <p class="connection-key-note">Your key is stored on the research server and is never saved in browser storage.</p>
+    <div class="connection-actions"><button class="btn primary" type="submit">Connect &amp; start research</button><button class="btn" type="button" id="test-openai-connection" data-ai-test>Test connection</button></div>
+    <p id="openai-connection-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+  </form>
+  <div class="connection-bottom"><span id="openai-storage-status"></span><button id="disconnect-openai" class="text-button" hidden>Disconnect</button></div>
+  <a class="open-server-link" id="open-server-app" href="http://127.0.0.1:8765/CRAWLER/" hidden>Open the Python app at 127.0.0.1:8765 ↗</a>
+</dialog>
+<nav class="app-rail" aria-label="Main navigation">
+  <a class="rail-brand" href="index.html"><span class="brand-mark">◎</span><span>Trend Crawler<small>Research intelligence</small></span></a>
+  <div class="rail-label">WORKSPACE</div>
+  <button class="rail-link on" data-destination="overview"><span aria-hidden="true">▦</span>Overview</button>
+  <button class="rail-link" data-destination="watchlist"><span aria-hidden="true">☆</span>Watchlist<span id="rail-saved-count" class="rail-count">0</span></button>
+  <button class="rail-link" data-destination="operations"><span aria-hidden="true">◈</span>Sources &amp; System</button>
+  <div class="rail-shortcuts"><div class="rail-label">JUMP TO</div><button data-jump="signal-list">Priority signals <span>↗</span></button><button data-jump="overview-markets">Market context <span>↗</span></button><button data-jump="overview-news">Latest reporting <span>↗</span></button><button id="focus-research">Ask a question <kbd>/</kbd></button></div>
+  <div class="rail-bottom"><span id="backend-state"><i class="dotc"></i>Checking research server</span><small>Evidence before conclusions.</small></div>
+</nav>
+<header class="top">
+  <div class="logo"><span class="live"></span>Trend Crawler</div>
+  <input id="filter" placeholder="Search topics, entities, symbols" aria-label="Search topics, entities, or symbols">
+  <div class="seg" id="type"><button class="on" data-v="">All</button><button data-v="crypto">Crypto</button><button data-v="stock">Stocks</button></div>
+  <div class="menu">
+    <button class="btn" id="srcbtn"><span class="dotc" id="srcdot"></span><span id="srctxt">Connecting...</span></button>
+    <div class="panel" id="srcpanel" hidden>
+      <div id="status"></div>
+      <button class="btn" id="xbtn" title="Optional: search X with your own API key">Connect X API</button><button class="btn" id="twbtn" title="Listen to live Twitch chat read-only">Twitch chats</button>
+      <div class="dim sm" id="cnt" style="margin-top:12px"></div>
+    </div>
+  </div>
+</header>
+
+<div class="pulse"><span id="fng">Crypto mood: --</span><span id="pNews"></span><span id="updated"></span></div>
+<div id="movers"></div>
+
+<div class="wrap">
+  <div>
+    <div class="tabs" id="tabs" aria-label="Application views"><button class="on" data-t="intelligence">Intelligence</button><button data-t="research">Research</button><button data-t="workspace">Workspace</button><button data-t="registry">Source registry</button><button data-t="picks">Markets</button><button data-t="radar">New &amp; low-cost</button><button data-t="news">News &amp; politics</button><button data-t="mentions">Mentions</button><button data-t="feed">Live feed</button><button data-t="sources">Feed diagnostics</button></div>
+    <section id="tab-intelligence" aria-label="Trend intelligence"></section>
+    <section id="tab-research" aria-label="Research assistant" hidden></section>
+    <section id="tab-workspace" aria-label="Research workspace" hidden></section>
+    <section id="tab-registry" aria-label="Source registry" hidden></section>
+    <div id="tab-picks" hidden><div class="row hdr"><div>Asset</div><div>Price</div><div>Buzz</div><div>Mood</div><div>Why</div></div><div id="rows"></div></div>
+    <div id="tab-radar" hidden><div class="dim sm" style="padding:10px">Crypto under $1 or 30 days old, stocks under $5 or newly listed, ranked by rising chatter. Very high risk.</div><div id="radar"></div></div>
+    <div id="tab-news" hidden><div class="card2" id="read"></div><div class="card2" id="pmmacro"></div><label class="chk"><input type="checkbox" id="polOnly"> Political and regulatory only</label><div id="headlines"></div></div>
+    <div id="tab-mentions" hidden>
+      <div class="mhead"><b id="mtitle">Mentions</b><span class="dim sm" id="mcount"></span>
+        <select id="msent"><option value="">Any mood</option><option value="bull">Bullish</option><option value="bear">Bearish</option><option value="neu">Neutral</option></select>
+        <select id="mrel"><option value="0">Any reliability</option><option value="0.5">Medium or better</option><option value="0.8">High only</option></select>
+        <button class="btn sm" id="mclear">Reset</button></div>
+      <div class="fchips" id="mchips"></div>
+      <div id="mlist"></div>
+    </div>
+    <div id="tab-feed" hidden><div id="stream"></div></div>
+    <div id="tab-sources" hidden><div id="srcview"></div></div>
+  </div>
+  <aside id="research-detail" aria-label="Signal research detail"></aside>
+  <aside id="detail" hidden>
+    <div class="dh"><div><div class="dsym" id="dSym">--</div><div class="dim sm" id="dName"></div></div><div class="dpx"><div id="dPrice"></div><div class="sm" id="dChg"></div></div></div>
+    <div class="seg" id="ivs"></div>
+    <canvas id="chart"></canvas><div class="dim" id="ohlc">&nbsp;</div>
+    <div id="dStats"></div>
+  </aside>
+</div>
+<footer>Research only. Activity and publisher counts do not establish truth. Assessments distinguish reported statements, analyst reviews, and inferred relationships. Market data can be delayed; sentiment uses keywords.</footer>
+
+<!-- Classic scripts share one scope; order matters. -->
+<script src="js/core.js"></script>
+<script src="js/reliability.js"></script>
+<script src="js/text.js"></script>
+<script src="js/store.js"></script>
+<script src="js/intelligence.js"></script>
+<script src="js/server-bridge.js"></script>
+<script src="js/sources/social.js"></script>
+<script src="js/sources/discovery.js"></script>
+<script src="js/sources/news.js"></script>
+<script src="js/sources/community.js"></script>
+<script src="js/sources/outlets.js"></script>
+<script src="js/sources/public.js"></script>
+<script src="js/sources/markets.js"></script>
+<script src="js/market.js"></script>
+<script src="js/chart.js"></script>
+<script src="js/analytics.js"></script>
+<script src="js/history.js"></script>
+<script src="js/intelligence-ui.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/hub.js"></script>
+<script src="js/investment-ui.js"></script>
+<script src="js/network-board.js"></script>
+<script src="js/accounts.js"></script>
+<script src="js/start.js"></script>
+</body>
+</html>
