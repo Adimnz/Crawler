@@ -2,6 +2,8 @@
 const posts = new Map(), byAsset = new Map(), byTopic = new Map();
 const assetVer = new Map(), topicVer = new Map();
 const seenIds = new Set();
+// Only the browser's working set is capped; canonical research remains server-side.
+const MAX_RECENT_POSTS = 6000, TRIM_TO_POSTS = 5000;
 const recentPosts = [], newsPosts = [];
 let ingested = 0;
 const isSeen = id => seenIds.has(id);
@@ -39,6 +41,27 @@ function addPost(p) {
   if (p.src === 'News' || p.src === 'Politics') newsPosts.push(p);
   for (const s of p.syms) { if (!byAsset.has(s)) byAsset.set(s, []); byAsset.get(s).push(p); bump(assetVer, s); }
   if (p.pol) for (const s of p.topic || []) if (!syms.has(s)) { if (!byTopic.has(s)) byTopic.set(s, []); byTopic.get(s).push(p); bump(topicVer, s); }
+  if (posts.size > MAX_RECENT_POSTS) {
+    const evicted = new Set();
+    for (const id of posts.keys()) {
+      if (posts.size <= TRIM_TO_POSTS) break;
+      posts.delete(id);
+      evicted.add(id);
+    }
+    for (const [key, items] of byAsset) {
+      const keep = items.filter(item => !evicted.has(item.id));
+      if (keep.length) byAsset.set(key, keep); else byAsset.delete(key);
+      if (keep.length !== items.length) bump(assetVer, key);
+    }
+    for (const [key, items] of byTopic) {
+      const keep = items.filter(item => !evicted.has(item.id));
+      if (keep.length) byTopic.set(key, keep); else byTopic.delete(key);
+      if (keep.length !== items.length) bump(topicVer, key);
+    }
+    for (const list of [newsPosts, recentPosts]) {
+      for (let i = list.length - 1; i >= 0; i--) if (evicted.has(list[i].id)) list.splice(i, 1);
+    }
+  }
 }
 setInterval(() => {
   if (document.hidden) return;
