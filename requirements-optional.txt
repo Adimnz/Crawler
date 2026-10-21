@@ -1,0 +1,5 @@
+# The default local server needs only Python 3.11+ standard library.
+# Install only adapters you configure.
+psycopg[binary]>=3.2,<4
+boto3>=1.35,<2
+pypdf>=5,<7
