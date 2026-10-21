@@ -10,7 +10,7 @@
   const uid = () => 'manual-' + crypto.randomUUID();
   const clone = value => JSON.parse(JSON.stringify(value));
   let detail=null, personal=null, topic=null, selected=null, selectedEdge=null, selection=new Set(), dirty=false, undo=[], redo=[], filter='', evidenceFilter='', relationshipFilter='', drag=null, connecting=null, generation=0, pending=false, saving=false, visibleLimit=80;
-  let undoKey='', space=false, contextNode=null, focusedNode=null, attachingTopic=null, ignoreClick=false, lastClick=null, savePromise=null, canvasObserver=null;
+  let undoKey='', space=false, contextNode=null, focusedNode=null, attachingTopic=null, ignoreClick=false, lastClick=null, savePromise=null, canvasObserver=null, lastBoardPoll=0;
   const nodeWidth=206, nodeHeight=94;
   const active = () => detail && document.body.dataset.experience==='topic' && document.getElementById('research-network');
   const b = () => detail?.board;
@@ -145,7 +145,7 @@
     if(dirty&&detail)await save();
     attachingTopic=topic.id;
     const serial=++generation;
-    detail=null;selected=null;selectedEdge=null;selection.clear();undo=[];redo=[];dirty=false;filter='';visibleLimit=80;
+    detail=null;selected=null;selectedEdge=null;selection.clear();undo=[];redo=[];dirty=false;filter='';visibleLimit=80;lastBoardPoll=0;
     const host=document.getElementById('research-network');if(host)host.innerHTML='<div class="network-loading">Opening the observation board…</div>';
     try{
       const result=await api.request('boards',{topicId:topic.id});if(serial!==generation||topic.id!==nextTopic.id)return;
@@ -374,7 +374,11 @@
     }
   });
   async function poll() {
-    if(!active()||pending||document.hidden||drag||connecting)return;pending=true;const boardId=b().id;
+    if(!active()||pending||document.hidden||drag||connecting||!api.connected)return;
+    const busy=(detail.tasks||[]).some(task=>['Queued','Researching'].includes(task.status));
+    const interval=busy?15000:60000;
+    if(Date.now()-lastBoardPoll<interval)return;
+    lastBoardPoll=Date.now();pending=true;const boardId=b().id;
     try{const result=await api.request('boards?id='+encodeURIComponent(boardId));if(!active()||b().id!==boardId)return;
       const graphChanged=result.graph.version!==detail.graph.version||result.graph.nodes.length!==detail.graph.nodes.length;
       if(!dirty&&!saving){const view=b().viewport;detail=result;detail.board.viewport=view;}else{detail.graph=result.graph;detail.tasks=result.tasks;}
@@ -387,6 +391,6 @@
     const boardId=new URLSearchParams(location.search).get('board');
     if(api.connected&&boardId&&!detail&&!pending){pending=true;openBoard(boardId).catch(e=>{const target=document.getElementById('start-feedback');if(target)target.textContent=e.message;}).finally(()=>{pending=false;history.replaceState(null,'',location.pathname);});}
   });
-  setInterval(poll,6000);
+  setInterval(poll,10000);
   window.CrawlerNetwork={attach,openBoard,save,get detail(){return detail;},get dirty(){return dirty;}};
 })();
