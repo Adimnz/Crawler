@@ -44,7 +44,7 @@ def main():
     print("Research database: " + ("PostgreSQL" if service.db.postgres else "SQLite") + "; AI " + ("configured" if service.ai.ready else "not configured"), flush=True)
     print("Open this address for search and OpenAI setup; a separate IDE/static server has no research API.", flush=True)
     if not args.no_workers:
-        service.start(int(os.getenv("CRAWLER_WORKERS", "3")))
+        service.start(int(os.getenv("CRAWLER_WORKERS", "2")))
     def stop_from_signal(signum, _frame):
         # shutdown() must run off the serving thread, including for SIGTERM.
         print("Trend Crawler: shutdown requested (signal " + str(signum) + ")", flush=True)
