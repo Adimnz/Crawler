@@ -61,6 +61,8 @@ function setStatus(n, ok, msg = '') {
 function job(name, fn, ms, delay = 0) {
   let fails = 0;
   const run = async () => {
+    // Do not silently fall back to browser collectors when the Python server stops.
+    if (window.CrawlerServer?.offline) return setTimeout(run, 60000);
     if (document.hidden) return setTimeout(run, 5000);
     if (document.body.dataset.experience && document.body.dataset.experience !== 'workspace') return setTimeout(run, 5000);
     if (window.CrawlerServer?.connected && !['Prediction markets'].includes(name)) return setTimeout(run, Math.max(ms, 15000));

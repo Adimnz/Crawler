@@ -3,6 +3,7 @@ const WSH = ['wss://stream.binance.com:9443', 'wss://data-stream.binance.vision'
 const live = new Map();
 let wsI = 0, ws, lastMsg = 0;
 function connectTicker() {
+  if (window.CrawlerServer?.offline) return;
   if (document.body.dataset.experience && document.body.dataset.experience !== 'workspace') return;
   const me = ws = new WebSocket(WSH[wsI] + '/ws/!miniTicker@arr'); lastMsg = Date.now();
   me.onopen = () => setStatus('Price stream', true, WSH[wsI]);
@@ -16,11 +17,19 @@ function connectTicker() {
       if (b.length >= 3) known.crypto.add(b);
     }
   };
-  const fail = () => { if (ws !== me) return; ws = null; setStatus('Price stream', false, 'reconnecting'); wsI = (wsI + 1) % WSH.length; setTimeout(connectTicker, 1500); };
+  const fail = () => { if (ws !== me) return; ws = null; setStatus('Price stream', false, 'reconnecting'); wsI = (wsI + 1) % WSH.length; if (!window.CrawlerServer?.offline) setTimeout(connectTicker, 1500); };
   me.onclose = me.onerror = fail;
 }
 setInterval(() => { if (ws && Date.now() - lastMsg > 15000) ws.close(); }, 5000);
 connectTicker();
+window.addEventListener('crawler:server-state', () => {
+  if (window.CrawlerServer?.offline && ws) {
+    const current = ws;
+    ws = null; current.onclose = current.onerror = null;
+    current.close();
+    setStatus('Price stream', false, 'Research server stopped');
+  }
+});
 window.addEventListener('crawler:experience-change', () => {
   if (document.body.dataset.experience === 'workspace') { if (!ws) connectTicker(); }
   else if (ws) { const closing = ws; ws = null; closing.onclose = closing.onerror = null; closing.close(); }
@@ -52,7 +61,7 @@ async function fetchCandles(type, sym, iv, limit = 150) {
 }
 let quoteQueue = [], qi = 0;
 setInterval(async () => {
-  if (document.hidden) return;
+  if (window.CrawlerServer?.offline || document.hidden) return;
   if (document.body.dataset.experience && document.body.dataset.experience !== 'workspace') return;
   if (!quoteQueue.length) return;
   const sym = quoteQueue[qi++ % quoteQueue.length];

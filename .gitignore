@@ -6,3 +6,8 @@ __pycache__/
 openai-settings.json
 .openai-settings-*.tmp
 test-results/
+
+# Never commit local credentials or copied API keys.
+API KEY.txt
+*.env.local
+*.secrets.json

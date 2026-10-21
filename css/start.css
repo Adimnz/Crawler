@@ -53,3 +53,20 @@ body[data-experience="workspace"] .start-ai-button{padding:5px 10px;font-size:10
 @media(max-width:700px){.start-topbar{height:74px;padding:0 22px}.start-brand{font-size:14px}.start-ai-button{font-size:10px;padding:8px 10px}#start-screen{min-height:calc(100svh - 74px);padding:0 20px 80px}.start-center{margin-top:-20px}#start-heading{font-size:clamp(39px,9vw,60px);margin-bottom:30px}.start-search{padding-left:16px;border-radius:12px}.start-search input{font-size:13px}.start-workspace-link{left:23px;bottom:22px}.topic-recent{right:22px;bottom:25px}.start-hint{font-size:11px}#topic-workspace{padding:22px 20px 80px}.topic-search-row{margin-bottom:30px}.topic-layout{grid-template-columns:1fr;gap:20px}.topic-aside{border:0;border-top:1px solid #27373e;padding:22px 0 0}.topic-head{flex-direction:column;gap:0}.topic-head-actions{padding:0;margin:0 0 10px;justify-content:flex-start}.topic-statline{gap:16px}.topic-ai-notice{align-items:flex-start;flex-direction:column}.connection-dialog{padding:22px}.topic-head h1{font-size:34px}}
 @media(prefers-reduced-motion:reduce){.topic-state.busy i{animation:none}}
 @media(max-width:700px){.topic-research-columns{grid-template-columns:1fr;gap:10px}.topic-section-heading{gap:0}.topic-finding>p{font-size:13px}.topic-subject{padding:17px}.topic-statline a{font-size:11px}}
+
+/* Server lifecycle: closing the Python process cannot forcibly close unrelated browser tabs. */
+.crawler-server-lifecycle:not([hidden]) {
+  position: fixed; z-index: 99999; inset: auto 16px 16px 16px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  padding: 14px 18px; border: 1px solid #a96c55; border-radius: 12px;
+  background: #291f1b; color: #fff8f4;
+  box-shadow: 0 12px 32px #0008;
+}
+.crawler-server-lifecycle strong { font-size: 14px; }
+.crawler-server-lifecycle span { flex: 1 1 340px; font-size: 13px; }
+.crawler-server-lifecycle button, .crawler-stop-button {
+  cursor: pointer; border: 1px solid currentColor; border-radius: 8px;
+  background: transparent; color: inherit; padding: 7px 12px; font: inherit;
+}
+.crawler-stop-button[hidden], .crawler-server-lifecycle[hidden] { display: none !important; }
+.crawler-stop-button { font-size: 12px; }
