@@ -23,6 +23,36 @@ from .research_network import BoardConflict
 
 class AppServer(ThreadingHTTPServer):
     daemon_threads = True
+    request_queue_size = 32
+
+    def process_request(self, request, client_address):
+        # ThreadingHTTPServer otherwise creates an unbounded thread per connection.
+        if not self.http_slots.acquire(blocking=False):
+            try:
+                request.settimeout(0.5)
+                payload = b'{"error":"Research server is busy. Retry shortly."}'
+                response = (b"HTTP/1.1 503 Service Unavailable\r\n"
+                            b"Content-Type: application/json\r\n"
+                            b"Cache-Control: no-store\r\n"
+                            b"Connection: close\r\n"
+                            + b"Content-Length: " + str(len(payload)).encode() + b"\r\n\r\n" + payload)
+                request.sendall(response)
+            except OSError:
+                pass
+            finally:
+                self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self.http_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.http_slots.release()
 
     def __init__(self, address, service, root, auth_token=None):
         self.service = service
@@ -34,6 +64,7 @@ class AppServer(ThreadingHTTPServer):
         self.allowed_hosts = {"127.0.0.1", "localhost", "::1", bind_host, *filter(None, os.getenv("CRAWLER_ALLOWED_HOSTS", "").split(","))}
         self.sessions, self.session_lock = {}, threading.Lock()
         self.stopping = threading.Event()
+        self.http_slots = threading.BoundedSemaphore(max(2, min(32, int(os.getenv("CRAWLER_HTTP_CONNECTIONS", "8")))))
         super().__init__(address, Handler)
 
     def initiate_shutdown(self):
