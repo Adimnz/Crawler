@@ -794,10 +794,10 @@ class ResearchService:
                     self.db.put("operation", "scheduler", {"at": at, "error": "Scheduler iteration failed; retrying"})
                 except Exception:
                     pass
-            self.stop_event.wait(1)
+            self.stop_event.wait(5)
 
-    def start(self, workers=3):
-        for index in range(max(1, min(12, workers))):
+    def start(self, workers=2):
+        for index in range(max(1, min(4, workers))):
             thread = threading.Thread(target=self.worker, name="crawler-worker-" + str(index), daemon=True)
             thread.start()
             self.threads.append(thread)
@@ -805,7 +805,11 @@ class ResearchService:
         scheduler.start()
         self.threads.append(scheduler)
 
-    def close(self):
+    def close(self, grace_period=15):
+        """Stop scheduling/claiming jobs and allow active tasks a bounded drain."""
         self.stop_event.set()
+        deadline = time.monotonic() + max(0, grace_period)
         for thread in self.threads:
-            thread.join(timeout=2)
+            if thread is not threading.current_thread():
+                thread.join(timeout=max(0, deadline - time.monotonic()))
+        return [thread.name for thread in self.threads if thread.is_alive()]
