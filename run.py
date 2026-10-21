@@ -2,6 +2,7 @@
 from pathlib import Path
 import argparse
 import os
+import signal
 
 ROOT = Path(__file__).resolve().parent
 
@@ -32,7 +33,11 @@ def main():
     from server.service import ResearchService
     from server.http import AppServer
     service = ResearchService(args.data_dir, seed=not args.no_default_sources)
-    server = AppServer((args.host, args.port), service, ROOT)
+    try:
+        server = AppServer((args.host, args.port), service, ROOT)
+    except Exception:
+        service.close()
+        raise
     public_host = "127.0.0.1" if args.host in {"0.0.0.0", "::"} else args.host
     url = "http://" + public_host + ":" + str(server.server_port) + "/CRAWLER/"
     print("Trend Crawler: " + url, flush=True)
@@ -40,6 +45,14 @@ def main():
     print("Open this address for search and OpenAI setup; a separate IDE/static server has no research API.", flush=True)
     if not args.no_workers:
         service.start(int(os.getenv("CRAWLER_WORKERS", "3")))
+    def stop_from_signal(signum, _frame):
+        # shutdown() must run off the serving thread, including for SIGTERM.
+        print("Trend Crawler: shutdown requested (signal " + str(signum) + ")", flush=True)
+        server.initiate_shutdown()
+
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(signum, stop_from_signal)
+
     if args.open_browser:
         import threading
         import webbrowser
@@ -49,10 +62,17 @@ def main():
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        pass
+        server.initiate_shutdown()
     finally:
+        print("Trend Crawler: stopping research workers and closing HTTP server...", flush=True)
+        server.stopping.set()
+        service.stop_event.set()
         server.server_close()
-        service.close()
+        grace = max(1, min(60, int(os.getenv("CRAWLER_SHUTDOWN_GRACE_SECONDS", "15"))))
+        active = service.close(grace_period=grace)
+        if active:
+            print("Trend Crawler: " + ", ".join(active) + " did not finish before shutdown; durable jobs will be recovered after their leases expire.", flush=True)
+        print("Trend Crawler: stopped. Research collection is offline.", flush=True)
 
 
 if __name__ == "__main__":
