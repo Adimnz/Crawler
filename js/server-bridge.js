@@ -193,8 +193,14 @@
   document.addEventListener('click', async event => {
     if (!event.target.closest('[data-stop-crawler-server]')) return;
     if (!confirm('Stop the research server? Collection and scheduled research will stop; browser tabs will display an offline notice.')) return;
-    try { await window.CrawlerServer.shutdown(); }
-    catch (error) { lastFailure = error.message; lifecycleUI(); }
+    try {
+      if (window.CrawlerNetwork?.dirty) await window.CrawlerNetwork.save();
+      await window.CrawlerServer.shutdown();
+    } catch (error) {
+      lastFailure = error.message;
+      alert('Research board was not stopped safely: ' + error.message);
+      lifecycleUI();
+    }
   });
   window.addEventListener('DOMContentLoaded', () => { lifecycleUI(); probe(); });
   window.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() >= nextProbeAt) probe(); });
