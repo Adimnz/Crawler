@@ -15,7 +15,7 @@ import socket
 import ssl
 import threading
 import time
-from urllib.parse import urljoin, urlsplit, urlencode, parse_qsl, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlencode, parse_qsl, urlunsplit, quote
 from urllib.robotparser import RobotFileParser
 import xml.etree.ElementTree as ET
 
@@ -117,6 +117,7 @@ class Network:
                 connection.request(method, target, body=body, headers=scoped_headers)
                 response = connection.getresponse()
                 metadata = {k.lower(): v for k, v in response.getheaders()}
+                metadata["status"] = response.status
                 if response.status in {301, 302, 303, 307, 308}:
                     location = metadata.get("location")
                     if not location:
@@ -128,7 +129,7 @@ class Network:
                 if response.status >= 400:
                     retry = metadata.get("retry-after", "")
                     delay_seconds = int(retry) if retry.isdigit() else max(0, ((timestamp(retry) or 0) / 1000) - time.time())
-                    raise ConnectorError("Provider returned HTTP " + str(response.status), min(3600, delay_seconds) or None, status=response.status)
+                    raise ConnectorError("Provider returned HTTP " + str(response.status), min(3600, delay_seconds) or (3600 if response.status in {401, 403, 404, 410} else None), status=response.status)
                 if int(metadata.get("content-length", "0") or 0) > limit:
                     raise ConnectorError("Source record exceeds the collection size limit")
                 data = response.read(limit + 1)
@@ -154,7 +155,7 @@ class Network:
                 if "HTTP 404" in str(exc) or "HTTP 410" in str(exc):
                     parser.parse([])
                 else:
-                    raise ConnectorError("Cannot establish robots.txt collection permission") from exc
+                    raise ConnectorError("Cannot establish robots.txt collection permission", retry_after=3600) from exc
             with self.lock:
                 if len(self.robots_cache) >= 512:
                     expired = [host for host, item in self.robots_cache.items() if item[0] < time.time() - 3600]
@@ -170,7 +171,7 @@ class Network:
         return json.loads(data)
 
 
-def feed_records(data, source):
+def feed_records(data, source, stats=None):
     if b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
         raise ConnectorError("XML declarations containing entities or document types are not accepted")
     try:
@@ -178,13 +179,22 @@ def feed_records(data, source):
     except ET.ParseError as exc:
         raise ConnectorError("Source did not return valid RSS/Atom XML") from exc
     local = lambda tag: tag.rsplit("}", 1)[-1]
+    if local(root.tag).lower() not in {"rss", "rdf", "feed"}:
+        raise ConnectorError("Source returned a page instead of an RSS/Atom feed", retry_after=3600)
+    stats = stats if stats is not None else {}
+    stats.update(entries=0, rejected=0)
     results = []
     for item in root.iter():
         if local(item.tag) not in {"item", "entry"}:
             continue
+        stats["entries"] += 1
         fields, authors = {}, []
+        image = ""
         for child in item:
             name = local(child.tag)
+            media = child.attrib.get("url", "")
+            if not image and media and (name == "thumbnail" or name in {"content", "enclosure"} and (child.attrib.get("medium") == "image" or child.attrib.get("type", "").startswith("image"))):
+                image = media
             if name in {"author", "creator"}:
                 names = ["".join(element.itertext()) for element in child if local(element.tag) == "name"]
                 credited = names or [child.text or ""]
@@ -195,11 +205,28 @@ def feed_records(data, source):
                 fields[name] = "".join(child.itertext())
         title = strip_html(fields.get("title", ""))
         url = fields.get("url", "").strip()
+        if source.get("contentRole") == "community" and str(fields.get("comments", "")).startswith("https://"):
+            url = fields["comments"].strip()
+        try:
+            parsed = urlsplit(url)
+            port = parsed.port
+        except ValueError:
+            stats["rejected"] += 1
+            continue
+        # Some publishers still emit HTTP article links despite serving HTTPS.
+        # Retain the exact supplied link in raw; upgrade only configured hosts.
+        if parsed.scheme == "http" and parsed.hostname in source.get("config", {}).get("httpsArticleHosts", []) and not parsed.username and not parsed.password and port in (None, 80):
+            url = urlunsplit(("https", parsed.hostname, parsed.path, parsed.query, parsed.fragment))
         if not title or not url.startswith("https://"):
+            stats["rejected"] += 1
             continue
         description = fields.get("description") or fields.get("summary") or fields.get("content") or ""
         published = timestamp(fields.get("pubDate") or fields.get("published") or fields.get("updated"))
+        if not image:
+            found = re.search(r"""<img[^>]+src=["'](https://[^"']+)""", description, re.I)
+            image = found.group(1) if found else ""
         results.append({"title": title[:1500], "text": (title + ". " + strip_html(description))[:30000], "url": url, "publishedAt": published,
+                        "image": image if image.startswith("https://") and len(image) <= 2000 else "",
                         "authors": list(dict.fromkeys(authors))[:8],
                         "publishedEstimated": published is None, "raw": fields, "language": source.get("language", "unknown")})
     return results[:200]
@@ -232,9 +259,19 @@ def collect(source, network):
         headers[source.get("credentialHeader", "Authorization")] = source.get("credentialPrefix", "Bearer ") + secret
     if kind == "rss":
         if not network.allowed(source["url"]):
-            raise ConnectorError("Feed collection is disallowed by robots.txt")
+            raise ConnectorError("Feed collection is disallowed by robots.txt", retry_after=3600)
+        cache = source.get("httpCache", {})
+        if cache.get("url") == source["url"]:
+            for key, header in (("etag", "If-None-Match"), ("last-modified", "If-Modified-Since")):
+                if cache.get(key): headers[header] = cache[key]
         data, metadata, resolved = network.fetch(source["url"], headers)
-        return {"documents": feed_records(data, source), "raw": data, "metadata": metadata, "resolvedUrl": resolved}
+        if resolved != source["url"] and not network.allowed(resolved):
+            raise ConnectorError("Redirect collection is disallowed by robots.txt", retry_after=3600)
+        if metadata.get("status") == 304:
+            return {"documents": [], "raw": b"", "metadata": metadata, "resolvedUrl": resolved, "notModified": True}
+        stats = {}
+        records = feed_records(data, source, stats)
+        return {"documents": records, "raw": data, "metadata": metadata, "resolvedUrl": resolved, "feedStats": stats}
     if kind == "coingecko":
         url = "https://api.coingecko.com/api/v3/simple/price?" + urlencode({"ids": ",".join(config.get("ids", ["bitcoin", "ethereum"])), "vs_currencies": "usd", "include_24hr_vol": "true", "include_24hr_change": "true", "include_last_updated_at": "true"})
         key = os.getenv("COINGECKO_API_KEY")
@@ -265,6 +302,13 @@ def collect(source, network):
                 fields.update(assetId=asset_id, assetClass=config.get("assetClass", "unknown"), metric=config.get("metric", "price_usd"), observedAt=timestamp(fields.get("observedAt")))
                 observations.append(fields)
             else:
+                if config.get("urlTemplate"):
+                    template = str(config["urlTemplate"])
+                    value = dotted(row, config.get("urlValuePath", ""))
+                    if template.count("{value}") != 1 or not isinstance(value, (str, int)):
+                        continue
+                    fields["url"] = template.replace("{value}", quote(str(value), safe=""))
+                    if not fields["url"].startswith("https://"): raise ConnectorError("Document URL templates require HTTPS")
                 documents.append({**fields, "publishedAt": timestamp(fields.get("publishedAt")), "raw": row})
         return {"documents": documents, "observations": observations, "raw": json.dumps(payload).encode()}
     raise ConnectorError("Unsupported connector type")
@@ -275,6 +319,30 @@ DEFAULT_SOURCES = [
     {"id": "bbc", "name": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml", "family": "BBC", "tier": "major", "language": "en", "region": "Europe", "geographyVerified": True, "category": "Politics", "kind": "rss", "enabled": True},
     {"id": "bbc-mundo", "name": "BBC Mundo", "url": "https://feeds.bbci.co.uk/mundo/rss.xml", "family": "BBC", "tier": "major", "language": "es", "region": "Latin America", "geographyVerified": False, "category": "Politics", "kind": "rss", "enabled": True},
     {"id": "techcrunch", "name": "TechCrunch", "url": "https://techcrunch.com/feed/", "family": "TechCrunch", "tier": "specialist", "language": "en", "region": "North America", "geographyVerified": False, "category": "Technology", "kind": "rss", "enabled": True},
+    *[{"id": i, "name": n, "url": u, "family": f, "tier": t, "language": "en", "region": "North America", "geographyVerified": False, "category": c, "kind": "rss", "enabled": True, "interval": s * 1000}
+      for i, n, u, f, t, c, s in (
+        ("npr", "NPR News", "https://feeds.npr.org/1001/rss.xml", "NPR", "major", "Politics", 600),
+        ("nyt", "New York Times", "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", "The New York Times", "major", "Politics", 600),
+        ("nyt-business", "New York Times Business", "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "The New York Times", "major", "Economics", 600),
+        ("nbc", "NBC News", "https://feeds.nbcnews.com/nbcnews/public/news", "NBC News", "major", "Politics", 600),
+        ("propublica", "ProPublica", "https://feeds.propublica.org/propublica/main", "ProPublica", "specialist", "Investigations", 900),
+        ("intercept", "The Intercept", "https://theintercept.com/feed/?rss", "The Intercept", "specialist", "Investigations", 900),
+        ("democracynow", "Democracy Now!", "https://www.democracynow.org/democracynow.rss", "Democracy Now!", "specialist", "Politics", 900),
+        ("marshall", "The Marshall Project", "https://www.themarshallproject.org/rss/recent.rss", "The Marshall Project", "specialist", "Justice", 900),
+        ("insideclimate", "Inside Climate News", "https://insideclimatenews.org/feed/", "Inside Climate News", "specialist", "Climate", 900),
+        ("reuters", "Reuters (via Google News)", "https://news.google.com/rss/search?q=site:reuters.com+when:1d&hl=en-US&gl=US&ceid=US:en", "Reuters", "wire", "Economics", 300),
+        ("bloomberg-markets", "Bloomberg Markets", "https://feeds.bloomberg.com/markets/news.rss", "Bloomberg", "major", "Markets", 300),
+        ("bloomberg-tech", "Bloomberg Technology", "https://feeds.bloomberg.com/technology/news.rss", "Bloomberg", "major", "Technology", 600),
+        ("businessinsider", "Business Insider", "https://feeds.businessinsider.com/custom/all", "Business Insider", "major", "Business", 600),
+        ("cnbc", "CNBC Top News", "https://www.cnbc.com/id/100003114/device/rss/rss.html", "CNBC", "major", "Markets", 300),
+        ("cnbc-markets", "CNBC Markets", "https://www.cnbc.com/id/20910258/device/rss/rss.html", "CNBC", "major", "Markets", 300),
+        ("yahoo-finance", "Yahoo Finance", "https://finance.yahoo.com/news/rssindex", "Yahoo Finance", "major", "Markets", 300),
+        ("googlenews", "Google News", "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en", "Google News", "major", "Politics", 600),
+        ("flipboard", "Flipboard", "https://flipboard.com/@flipboard.rss", "Flipboard", "social", "Technology", 900),
+      )],
     {"id": "coingecko", "name": "CoinGecko prices", "url": "https://api.coingecko.com/api/v3/simple/price", "family": "CoinGecko", "tier": "specialist", "language": "en", "kind": "coingecko", "enabled": False, "config": {"ids": ["bitcoin", "ethereum"]}},
     {"id": "fred", "name": "FRED inflation", "url": "https://api.stlouisfed.org/fred/series/observations", "family": "Federal Reserve Bank of St. Louis", "tier": "primary", "language": "en", "kind": "fred", "enabled": False, "config": {"series": "CPIAUCSL"}},
 ]
+
+from .source_catalog import catalogue
+DEFAULT_SOURCES = catalogue(DEFAULT_SOURCES)

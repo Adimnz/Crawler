@@ -1,0 +1,818 @@
+{
+  "checkedAt": "2026-10-21T02:52:59Z",
+  "mode": "collected",
+  "checked": 51,
+  "connected": 39,
+  "results": [
+    {
+      "id": "404media",
+      "name": "404 Media",
+      "url": "https://www.404media.co/rss/",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 15,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 15,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 21.64
+    },
+    {
+      "id": "aljazeera",
+      "name": "Al Jazeera",
+      "url": "https://www.aljazeera.com/xml/rss/all.xml",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 25,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 25,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 45.59
+    },
+    {
+      "id": "bbc",
+      "name": "BBC World",
+      "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 35,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 35,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 6.79
+    },
+    {
+      "id": "bbc-business",
+      "name": "BBC Business",
+      "url": "https://feeds.bbci.co.uk/news/business/rss.xml",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 52,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 47,
+        "revised": 4,
+        "unchanged": 3,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 91.28
+    },
+    {
+      "id": "bbc-mundo",
+      "name": "BBC Mundo",
+      "url": "https://feeds.bbci.co.uk/mundo/rss.xml",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 34,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 34,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 7.6
+    },
+    {
+      "id": "bellingcat",
+      "name": "Bellingcat",
+      "url": "https://www.bellingcat.com/feed/",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 10,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 10,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 22.71
+    },
+    {
+      "id": "bignewsletter",
+      "name": "BIG — Matt Stoller",
+      "url": "https://www.thebignewsletter.com/feed",
+      "contentRole": "commentary",
+      "ok": true,
+      "items": 20,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 20,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 41.89
+    },
+    {
+      "id": "bloomberg-markets",
+      "name": "Bloomberg Markets",
+      "url": "https://feeds.bloomberg.com/markets/news.rss",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 20,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 20,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 42.5
+    },
+    {
+      "id": "bloomberg-tech",
+      "name": "Bloomberg Technology",
+      "url": "https://feeds.bloomberg.com/technology/news.rss",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 20,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 20,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 29.08
+    },
+    {
+      "id": "businessinsider",
+      "name": "Business Insider",
+      "url": "https://feeds.businessinsider.com/custom/all",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 20,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 20,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 46.41
+    },
+    {
+      "id": "calculatedrisk",
+      "name": "Calculated Risk",
+      "url": "https://feeds.feedburner.com/CalculatedRisk",
+      "contentRole": "commentary",
+      "ok": true,
+      "items": 25,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 25,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 75.47
+    },
+    {
+      "id": "capitalmain",
+      "name": "Capital & Main",
+      "url": "https://capitalandmain.com/feed",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 10,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 10,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 15.72
+    },
+    {
+      "id": "carbonbrief",
+      "name": "Carbon Brief",
+      "url": "https://www.carbonbrief.org/feed/",
+      "contentRole": "reporting",
+      "ok": false,
+      "error": "Cannot establish robots.txt collection permission",
+      "seconds": 1.15
+    },
+    {
+      "id": "cnbc",
+      "name": "CNBC Top News",
+      "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 30,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 30,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 74.35
+    },
+    {
+      "id": "cnbc-markets",
+      "name": "CNBC Markets",
+      "url": "https://www.cnbc.com/id/20910258/device/rss/rss.html",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 30,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 29,
+        "revised": 0,
+        "unchanged": 1,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 64.47
+    },
+    {
+      "id": "damodaran",
+      "name": "Musings on Markets — Aswath Damodaran",
+      "url": "https://aswathdamodaran.blogspot.com/feeds/posts/default?alt=rss",
+      "contentRole": "commentary",
+      "ok": true,
+      "items": 25,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 25,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 55.62
+    },
+    {
+      "id": "democracynow",
+      "name": "Democracy Now!",
+      "url": "https://www.democracynow.org/democracynow.rss",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 37,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 37,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 104.85
+    },
+    {
+      "id": "dollarsdata",
+      "name": "Of Dollars and Data",
+      "url": "https://ofdollarsanddata.com/feed/",
+      "contentRole": "commentary",
+      "ok": true,
+      "items": 10,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 10,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 30.31
+    },
+    {
+      "id": "dw",
+      "name": "Deutsche Welle",
+      "url": "https://rss.dw.com/rdf/rss-en-all",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 133,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 133,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 193.97
+    },
+    {
+      "id": "economics-stackexchange",
+      "name": "Economics — Stack Exchange",
+      "url": "https://economics.stackexchange.com/feeds",
+      "contentRole": "community",
+      "ok": false,
+      "error": "Cannot establish robots.txt collection permission",
+      "seconds": 1.57
+    },
+    {
+      "id": "fed",
+      "name": "Federal Reserve",
+      "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+      "contentRole": "primary",
+      "ok": true,
+      "items": 20,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 20,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 4.12
+    },
+    {
+      "id": "flipboard",
+      "name": "Flipboard",
+      "url": "https://flipboard.com/@flipboard.rss",
+      "contentRole": "discovery",
+      "ok": true,
+      "items": 30,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 30,
+        "observations": 0
+      },
+      "seconds": 9.15
+    },
+    {
+      "id": "france24",
+      "name": "France 24",
+      "url": "https://www.france24.com/en/rss",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 24,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 24,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 48.89
+    },
+    {
+      "id": "globalvoices",
+      "name": "Global Voices",
+      "url": "https://globalvoices.org/feed/",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 15,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 15,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 33.47
+    },
+    {
+      "id": "googlenews",
+      "name": "Google News",
+      "url": "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+      "contentRole": "discovery",
+      "ok": false,
+      "error": "Feed collection is disallowed by robots.txt",
+      "seconds": 1.6
+    },
+    {
+      "id": "grist",
+      "name": "Grist",
+      "url": "https://grist.org/feed/",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 20,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 20,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 62.35
+    },
+    {
+      "id": "guardian-business",
+      "name": "The Guardian Business",
+      "url": "https://www.theguardian.com/uk/business/rss",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 40,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 40,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 71.72
+    },
+    {
+      "id": "hn",
+      "name": "Hacker News discussions",
+      "url": "https://news.ycombinator.com/rss",
+      "contentRole": "community",
+      "ok": false,
+      "error": "Cannot establish robots.txt collection permission",
+      "seconds": 0.99
+    },
+    {
+      "id": "hn-api",
+      "name": "Hacker News finance discussions (Algolia API)",
+      "url": "https://hn.algolia.com/api/v1/search_by_date?tags=story&query=finance&hitsPerPage=20",
+      "contentRole": "community",
+      "ok": true,
+      "items": 20,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 20,
+        "observations": 0
+      },
+      "seconds": 3.24
+    },
+    {
+      "id": "hn-finance",
+      "name": "Hacker News finance discussions (via HNRSS)",
+      "url": "https://hnrss.org/newest?q=finance",
+      "contentRole": "community",
+      "ok": false,
+      "error": "Provider returned HTTP 502",
+      "seconds": 5.25
+    },
+    {
+      "id": "icij",
+      "name": "ICIJ",
+      "url": "https://www.icij.org/feed/",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 11,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 11,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 16.91
+    },
+    {
+      "id": "insideclimate",
+      "name": "Inside Climate News",
+      "url": "https://insideclimatenews.org/feed/",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 10,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 10,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 13.62
+    },
+    {
+      "id": "intercept",
+      "name": "The Intercept",
+      "url": "https://theintercept.com/feed/?rss",
+      "contentRole": "reporting",
+      "ok": false,
+      "error": "Cannot establish robots.txt collection permission",
+      "seconds": 0.93
+    },
+    {
+      "id": "ipsos",
+      "name": "Ipsos research",
+      "url": "https://www.ipsos.com/en/rss.xml",
+      "contentRole": "survey",
+      "ok": true,
+      "items": 20,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 20,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 44.24
+    },
+    {
+      "id": "marginalrevolution",
+      "name": "Marginal Revolution",
+      "url": "https://marginalrevolution.com/feed",
+      "contentRole": "commentary",
+      "ok": true,
+      "items": 15,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 15,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 26.91
+    },
+    {
+      "id": "marshall",
+      "name": "The Marshall Project",
+      "url": "https://www.themarshallproject.org/rss/recent.rss",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 50,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 50,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 92.4
+    },
+    {
+      "id": "money-stackexchange",
+      "name": "Personal Finance & Money — Stack Exchange",
+      "url": "https://money.stackexchange.com/feeds",
+      "contentRole": "community",
+      "ok": false,
+      "error": "Cannot establish robots.txt collection permission",
+      "seconds": 0.9
+    },
+    {
+      "id": "nbc",
+      "name": "NBC News",
+      "url": "https://feeds.nbcnews.com/nbcnews/public/news",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 20,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 25,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 16.33
+    },
+    {
+      "id": "noahpinion",
+      "name": "Noahpinion",
+      "url": "https://www.noahpinion.blog/feed",
+      "contentRole": "commentary",
+      "ok": true,
+      "items": 20,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 20,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 45.53
+    },
+    {
+      "id": "npr",
+      "name": "NPR News",
+      "url": "https://feeds.npr.org/1001/rss.xml",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 10,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 10,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 15.02
+    },
+    {
+      "id": "npr-business",
+      "name": "NPR Business",
+      "url": "https://feeds.npr.org/1006/rss.xml",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 10,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 7,
+        "revised": 0,
+        "unchanged": 3,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 20.62
+    },
+    {
+      "id": "nyt",
+      "name": "New York Times",
+      "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 17,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 17,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 24.92
+    },
+    {
+      "id": "nyt-business",
+      "name": "New York Times Business",
+      "url": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 49,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 49,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 44.64
+    },
+    {
+      "id": "pew",
+      "name": "Pew Research Center",
+      "url": "https://www.pewresearch.org/feed/",
+      "contentRole": "survey",
+      "ok": false,
+      "error": "Cannot establish robots.txt collection permission",
+      "seconds": 1.52
+    },
+    {
+      "id": "propublica",
+      "name": "ProPublica",
+      "url": "https://www.propublica.org/feeds/propublica/main",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 20,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 20,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 21.04
+    },
+    {
+      "id": "restofworld",
+      "name": "Rest of World",
+      "url": "https://restofworld.org/feed/latest/",
+      "contentRole": "reporting",
+      "ok": false,
+      "error": "Cannot establish robots.txt collection permission",
+      "seconds": 1.54
+    },
+    {
+      "id": "reuters",
+      "name": "Reuters (via Google News)",
+      "url": "https://news.google.com/rss/search?q=site:reuters.com+when:1d&hl=en-US&gl=US&ceid=US:en",
+      "contentRole": "discovery",
+      "ok": false,
+      "error": "Feed collection is disallowed by robots.txt",
+      "seconds": 0.42
+    },
+    {
+      "id": "ritholtz",
+      "name": "The Big Picture — Barry Ritholtz",
+      "url": "https://ritholtz.com/feed/",
+      "contentRole": "commentary",
+      "ok": false,
+      "error": "Cannot establish robots.txt collection permission",
+      "seconds": 1.08
+    },
+    {
+      "id": "techcrunch",
+      "name": "TechCrunch",
+      "url": "https://techcrunch.com/feed/",
+      "contentRole": "reporting",
+      "ok": true,
+      "items": 20,
+      "status": "no-new-items",
+      "lastPoll": {
+        "added": 0,
+        "revised": 0,
+        "unchanged": 20,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 7.92
+    },
+    {
+      "id": "wealthcommonsense",
+      "name": "A Wealth of Common Sense",
+      "url": "https://awealthofcommonsense.com/feed/",
+      "contentRole": "commentary",
+      "ok": true,
+      "items": 10,
+      "status": "collecting",
+      "lastPoll": {
+        "added": 10,
+        "revised": 0,
+        "unchanged": 0,
+        "rejected": 0,
+        "leads": 0,
+        "observations": 0
+      },
+      "seconds": 16.94
+    },
+    {
+      "id": "yahoo-finance",
+      "name": "Yahoo Finance",
+      "url": "https://finance.yahoo.com/rss/2.0/headline?s=SPY&region=US&lang=en-US",
+      "contentRole": "reporting",
+      "ok": false,
+      "error": "Redirect collection is disallowed by robots.txt",
+      "seconds": 2.12
+    }
+  ]
+}

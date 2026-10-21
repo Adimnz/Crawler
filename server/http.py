@@ -225,7 +225,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception: self.json({"error": "Private research could not be loaded"}, 500, cookie)
             return
         account = self.account_session()
-        public_reads = {"/api/sources", "/api/documents", "/api/events", "/api/investment", "/api/topics", "/api/ai/settings", "/api/asset-profile", "/api/cross-market-report", "/api/observations", "/api/asset-assessments", "/api/dossier", "/api/graph", "/api/document-versions", "/api/event-study"}
+        public_reads = {"/api/source-items", "/api/sources", "/api/documents", "/api/events", "/api/investment", "/api/topics", "/api/ai/settings", "/api/asset-profile", "/api/cross-market-report", "/api/observations", "/api/asset-assessments", "/api/dossier", "/api/graph", "/api/document-versions", "/api/event-study"}
         account_allowed = bool(account and not self.server.service.accounts.public(account)["needsMfa"] and path in public_reads)
         if not self.is_owner(session) and not account_allowed:
             self.json({"error": "Owner sign-in is required"}, 401, cookie)
@@ -236,6 +236,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/sources":
                 result = {"sources": [service.public_source(source) for source in service.db.list("source")]}
+            elif path == "/api/source-items":
+                result = service.source_items(value("id"))
             elif path == "/api/documents":
                 result = service.documents(int(value("after", 0)), value("afterId"), max(1, min(500, int(value("limit", 300)))))
             elif path == "/api/events":
@@ -398,7 +400,9 @@ class Handler(BaseHTTPRequestHandler):
                 source = service.db.get("source", body.get("id", ""))
                 if not source or not source.get("enabled"):
                     raise ValueError("Enable the registered source before polling it")
-                result = {"jobId": service.db.enqueue("poll", {"sourceId": source["id"]}, "manual:" + source["id"] + ":" + str(now_ms() // 60000))}
+                result = {"jobId": service.queue_source_poll(source["id"], manual=True)}
+            elif path == "/api/sources/poll-all":
+                result = {"jobIds": [service.queue_source_poll(s["id"], manual=True) for s in service.db.list("source") if s.get("enabled")]}
             elif path == "/api/documents/import":
                 result = service.import_document(body)
             elif path == "/api/documents/fetch":

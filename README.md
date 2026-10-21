@@ -86,7 +86,7 @@ Local research remains available as `local-owner` without registration. Account 
 
 | Area | What runs now | Configuration or practical limit |
 | --- | --- | --- |
-| Acquisition | Server RSS/Atom workers, generic mapped JSON connectors, CoinGecko and FRED adapters, adaptive polling, bounded retries, Retry-After, durable job leases, dead-letter recovery, raw content-addressed storage, permitted document retrieval/import | Configure provider credentials and permissions. Default RSS sources are a small starting set. No licensed data subscription is included. |
+| Acquisition | Server RSS/Atom workers, a public-feed catalogue, mapped JSON connectors, CoinGecko and FRED adapters, conditional polling, bounded retries, Retry-After, durable job leases, dead-letter recovery, raw content-addressed storage, permitted document retrieval/import | The Sources directory shows measured availability and usable contributions. Configure provider credentials and permissions for licensed data; subscriptions are not included. |
 | Verification | Sentence-level claim extraction; optional AI extraction with exact quote-span validation; candidate reporting chains; possible numerical/negation conflicts; explicit reviews; source revisions; correction/retraction propagation; additional high-consequence review | Detectors produce review candidates. They do not prove truth, independence, or authenticity. Hidden syndication still needs review. |
 | Multilingual coverage | Original-language preservation, optional English translation, reviewed publisher geography, local-coverage gaps | Translation requires configured AI. Source geography and regions mentioned in text are separate metadata. |
 | Trends | Hourly counts, coverage-adjusted windows, same-weekday/hour seasonal samples, robust MAD anomaly scores, lexical semantic clustering, optional vectors, persistent lifecycle history and periodic reassessment | Baselines require 95% uptime, a stable source set, and 70% provider availability across both windows. Seasonal scores need three covered historical samples. |
@@ -167,6 +167,36 @@ For article records, use `recordType: "document"` with fields `title`, `text`, `
 
 Feeds and permitted documents check robots.txt, public HTTPS destinations, response size, redirects, and host rate spacing. Full-document retrieval is disabled until enabled for a source. Network requests reject private, loopback, link-local, and reserved destinations and pin validated IPs during TLS connections. XML entity declarations are rejected. The legacy browser fallback can still use public CORS proxies; server collection does not use those proxies.
 
+### Sources directory and efficient collection
+
+Open **Sources** beside the search bar to search publishers, filter by content type or connection status, inspect collected headlines, add a public RSS/Atom feed, and queue collection. It loads on demand and renders twelve sources at a time. Connected sources appear first. The original centered search screen remains the default.
+
+The catalogue includes all requested publishers: Flipboard, NPR, The New York Times, BBC, NBC, ProPublica, The Intercept, Democracy Now!, The Marshall Project, Inside Climate News, Reuters discovery, Business Insider, CNBC, Yahoo Finance, Bloomberg and Google News. Added reporting and analysis includes Bellingcat, ICIJ, 404 Media, Capital & Main, Global Voices, Grist, Al Jazeera, DW, France 24, Calculated Risk, Aswath Damodaran, Marginal Revolution, Ben Carlson, Nick Maggiulli, Noah Smith and Matt Stoller. Ipsos and Pew provide survey-research connections. Public finance discussions include RSS connections and the documented [Hacker News search API](https://hn.algolia.com/api).
+
+Availability is measured, not assumed. See [the live connection report](docs/feed-connection-check.json) for the dated result of the collection run. Some endpoints deny automated access or have temporary failures. Those remain visible with their error and next retry time. The Yahoo endpoint was updated from its obsolete 404 URL, but its destination currently disallows collection. Reuters is explicitly a Google News discovery connection; direct Reuters delivery needs authorized provider access. These entries do not claim a working licensed feed.
+
+Reporting, official releases, commentary and survey research carry their content role into AI topic synthesis. Discovery headlines and community discussions are stored separately as **research leads**; they do not create verified claims, factual relationship edges or prices. Relevant discovery links can enter the existing bounded original-page retrieval workflow. Community discussions can be inspected and opened directly. Survey headlines require their underlying methodology before interpreting them as population estimates. Private chats, login-only forums and subscriber-only text need an authorized connector. Numeric market observations remain with the existing instrument-aware financial connectors.
+
+Collection now uses ETag/Last-Modified validators where supplied, recognizes HTTP 304, deduplicates unchanged entries before indexing, checks redirected feed permissions, isolates rejected entries, and records per-poll new/revised/unchanged/rejected counts and duration. Source endpoints and paused choices edited by the user are preserved when catalogue updates are installed. Known obsolete default endpoints are repaired. Legacy HTTP article links are upgraded only for the configured Democracy Now! and Calculated Risk hosts, preserving the publisher-supplied URL in raw metadata.
+
+Polling requests coalesce into one queued job per source and respect provider cooldowns. With the default two workers, one is reserved for topic/board research and the other processes collection and background analysis. `CRAWLER_WORKERS=4` allows three background workers. Host spacing and bounded retries remain active. Initial archive collection can take several minutes; subsequent unchanged polls avoid indexing and analysis work. Browser archive synchronization uses at most two 100-document pages per pass and yields while processing. No archive or feed directory requests run on the idle search screen.
+
+Run a repeatable connection check without storing articles:
+
+```powershell
+python CRAWLER/tools/poll_sources.py --report CRAWLER/data/feed-check.json
+```
+
+Collect into the application's database without starting AI workers:
+
+```powershell
+python CRAWLER/tools/poll_sources.py --collect --report CRAWLER/data/feed-check.json
+# Optional: limit a check or collection to particular source IDs
+python CRAWLER/tools/poll_sources.py --collect --source bbc-business --source hn-api
+```
+
+Use `--data-dir` for a separate SQLite archive; an already-set `DATABASE_URL` selects PostgreSQL. The command does not load `.env` or schedule paid enrichment. For configured/credentialed connectors, use the running server's **Poll enabled sources** action. Read `/api/source-items?id=…` for bounded contribution previews; owner-only POST `/api/sources/poll-all` queues enabled sources without waiting for remote requests.
+
 ### Database and raw objects
 
 `CRAWLER/data/` contains the default `research.sqlite3` and content-addressed raw objects. Source versions are append-only. Back up both together.
@@ -216,6 +246,7 @@ node CRAWLER/tests/search-browser.cjs
 node CRAWLER/tests/loading-browser.cjs
 node CRAWLER/tests/market-research-browser.cjs
 node CRAWLER/tests/network-browser.cjs
+node CRAWLER/tests/sources-browser.cjs
 ```
 
 The first starts a static server and checks fallback, navigation, review gates, local persistence, search, exports, and responsive layout. The second starts an isolated fixture research server and checks sync, extracted/reviewed claims, citations, monitors, briefs, connectors, replay, and revision deduplication. The market research suite checks a manual connected-model search with background AI off, a cited market brief and three types of watch subjects despite no financial instrument qualification, refreshes and mobile layout. Fixtures never enter the real application database. External providers are blocked during browser tests. Live AI, PostgreSQL, S3, licensed data, PDF, and C2PA adapters need configured integration environments.

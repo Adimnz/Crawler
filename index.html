@@ -10,9 +10,10 @@
 <link rel="stylesheet" href="css/investment.css">
 <link rel="stylesheet" href="css/start.css">
 <link rel="stylesheet" href="css/network-board.css">
+<link rel="stylesheet" href="css/source-directory.css">
 </head>
 <body data-experience="start">
-<div class="start-topbar"><button class="start-brand" id="new-topic-search" aria-label="Start a new research search"><span aria-hidden="true">◎</span> Crawler</button><button class="crawler-stop-button" data-stop-crawler-server hidden type="button">Stop server</button><button class="start-ai-button" data-openai-connect><i></i><span>Connect OpenAI</span></button></div>
+<div class="start-topbar"><button class="start-brand" id="new-topic-search" aria-label="Start a new research search"><span aria-hidden="true">◎</span> Crawler</button><button class="crawler-stop-button" data-stop-crawler-server hidden type="button">Stop server</button><button class="start-sources-button" data-open-source-directory>Sources</button><button class="start-ai-button" data-openai-connect><i></i><span>Connect OpenAI</span></button></div>
 <main id="start-screen" aria-labelledby="start-heading">
   <div class="start-center">
     <h1 id="start-heading">Where do I start</h1>
@@ -42,10 +43,13 @@
 <nav class="app-rail" aria-label="Main navigation">
   <a class="rail-brand" href="index.html"><span class="brand-mark">◎</span><span>Trend Crawler<small>Research intelligence</small></span></a>
   <div class="rail-label">WORKSPACE</div>
-  <button class="rail-link on" data-destination="overview"><span aria-hidden="true">▦</span>Overview</button>
+  <button class="rail-link on" data-destination="overview"><span aria-hidden="true">▦</span>Priority signals</button>
+  <button class="rail-link" data-destination="markets"><span aria-hidden="true">△</span>Market context</button>
+  <button class="rail-link" data-destination="reporting"><span aria-hidden="true">≡</span>Latest reporting</button>
+  <button class="rail-link" data-destination="activity"><span aria-hidden="true">∿</span>All activity</button>
   <button class="rail-link" data-destination="watchlist"><span aria-hidden="true">☆</span>Watchlist<span id="rail-saved-count" class="rail-count">0</span></button>
   <button class="rail-link" data-destination="operations"><span aria-hidden="true">◈</span>Sources &amp; System</button>
-  <div class="rail-shortcuts"><div class="rail-label">JUMP TO</div><button data-jump="signal-list">Priority signals <span>↗</span></button><button data-jump="overview-markets">Market context <span>↗</span></button><button data-jump="overview-news">Latest reporting <span>↗</span></button><button id="focus-research">Ask a question <kbd>/</kbd></button></div>
+  <div class="rail-shortcuts"><button id="focus-research">Ask a question <kbd>/</kbd></button></div>
   <div class="rail-bottom"><button class="crawler-stop-button" data-stop-crawler-server hidden type="button">Stop research server</button><span id="backend-state"><i class="dotc"></i>Checking research server</span><small>Evidence before conclusions.</small></div>
 </nav>
 <header class="top">
@@ -117,6 +121,7 @@
 <script src="js/intelligence-ui.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/hub.js"></script>
+<script src="js/source-directory.js"></script>
 <script src="js/investment-ui.js"></script>
 <script src="js/network-board.js"></script>
 <script src="js/accounts.js"></script>

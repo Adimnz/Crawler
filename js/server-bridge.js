@@ -112,16 +112,18 @@
     if (!connected || pulling) return;
     pulling = true;
     try {
-      for (let page = 0; page < 10; page++) {
-        const result = await request('documents?after=' + cursor.at + '&afterId=' + encodeURIComponent(cursor.id));
+      for (let page = 0; page < 2; page++) {
+        const result = await request('documents?limit=100&after=' + cursor.at + '&afterId=' + encodeURIComponent(cursor.id));
+        let processed = 0;
         for (const doc of result.documents) {
           const syms = (doc.entities || []).flatMap(entity => entity.id.startsWith('equity:') || entity.id.startsWith('unresolved:ticker:') ? [entity.id.split(':').pop()] : entity.id === 'crypto:coingecko:bitcoin' ? ['BTC'] : entity.id === 'crypto:coingecko:ethereum' ? ['ETH'] : []);
-          const post = { id: 'server-' + doc.id, src: 'News', outlet: true, listed: true, title: doc.title, text: doc.text, url: doc.url, sub: doc.source, tier: doc.tier, language: doc.language, ts: doc.publishedAt, publishedEstimated: doc.publishedEstimated, eventAt: doc.eventAt, syms, categories: doc.categories,
+          const post = { id: 'server-' + doc.id, src: 'News', outlet: true, listed: true, title: doc.title, image: doc.image, text: doc.text, url: doc.url, sub: doc.source, tier: doc.tier, language: doc.language, ts: doc.publishedAt, publishedEstimated: doc.publishedEstimated, eventAt: doc.eventAt, syms, categories: doc.categories,
             serverId: doc.id, serverEventId: doc.eventId, translation: doc.translation,
             raw: { title: doc.title, text: doc.text, source: doc.source, url: doc.url, sourceVersion: doc.version, sourceRetrievedAt: doc.retrievedAt, objectKey: doc.objectKey } };
           addPost(post);
           // The active post store may have already seen this text while derived analysis changed.
           engine.ingest(post, { text: post.text, url: post.url, source: post.sub, publishedAt: post.ts, ...post.raw });
+          if (++processed % 20 === 0) await new Promise(resolve => setTimeout(resolve, 0));
         }
         cursor = result.cursor;
         if (!result.hasMore) break;

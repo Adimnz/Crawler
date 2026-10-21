@@ -310,12 +310,20 @@ class ResearchNetwork:
         extra_graphs = [self.db.get("networkGraph", tid) for tid in board.get("branchTopics", [])[:30]]
         nodes = {node["id"]: node for node in graph["nodes"]}
         edges = {edge["id"]: edge for edge in graph["edges"]}
+        anchors = board.get("branchAnchors", {})
         for branch in extra_graphs:
             if not branch: continue
+            # The branch's own root is replaced by the board node that was researched.
+            anchor = anchors.get(branch["topicId"])
             for node in branch["nodes"]:
                 if node["type"] != "topic": nodes[node["id"]] = node
             for edge in branch["edges"]:
-                if edge["from"] in nodes and edge["to"] in nodes: edges[edge["id"]] = edge
+                if anchor and branch["rootId"] in (edge["from"], edge["to"]):
+                    edge = {**edge, "from": anchor if edge["from"] == branch["rootId"] else edge["from"], "to": anchor if edge["to"] == branch["rootId"] else edge["to"]}
+                    if edge["from"] == edge["to"] or anchor not in nodes and anchor not in {n["id"] for n in board["manualNodes"]}: continue
+                    if edge["from"] != anchor and edge["from"] not in nodes or edge["to"] != anchor and edge["to"] not in nodes: continue
+                    edges[edge["id"] + ":" + anchor] = {**edge, "id": edge["id"] + ":" + anchor}
+                elif edge["from"] in nodes and edge["to"] in nodes: edges[edge["id"]] = edge
         for edge in board.get("branchConnections", []): edges[edge["id"]] = edge
         for row in list(nodes.values()) + list(edges.values()):
             if row.get("evidence") and not self._current(row["evidence"]): row.update(status="Review required", lastVerifiedAt=None)
@@ -383,7 +391,7 @@ class ResearchNetwork:
             return {"deleted": True}
         if action == "duplicate":
             new = self.create_board(owner, {"topicId": board["topicId"], "duplicate": True, "title": board["title"] + " copy"})["board"]
-            for field in ("layout", "manualNodes", "manualEdges", "notes", "groups", "hidden", "pinned", "collapsed", "expanded", "viewport", "branchTopics", "branchConnections"):
+            for field in ("layout", "manualNodes", "manualEdges", "notes", "groups", "hidden", "pinned", "collapsed", "expanded", "viewport", "branchTopics", "branchConnections", "branchAnchors"):
                 if field in board: new[field] = copy.deepcopy(board[field])
             self.db.put("researchBoard", new["id"], new)
             self.db.put("boardRevision", new["id"] + ":v1", new)
@@ -537,7 +545,7 @@ class ResearchNetwork:
             if task.get("proposedConnection"):
                 proposal = task["proposedConnection"]
                 query = ("Is there independent public evidence for the unverified proposed relationship: " + proposal["from"][:180] + " " + proposal["type"].replace("_", " ") + " " + proposal["to"][:180] + "? Seek confirmation and contradictions.")[:900]
-            child = self.s.topics.create(query)
+            child = self.s.topics.create({"query": query, "embedded": True})
             task.update(childTopicId=child["id"], status="Collecting sources")
         else:
             child = self.s.topics.get(task["childTopicId"])
@@ -553,14 +561,7 @@ class ResearchNetwork:
             if not board or board["expansionState"] != "running": return self.db.get("researchTask", task_id)
             branches = list(dict.fromkeys(board.get("branchTopics", []) + [child["id"]]))
             board["branchTopics"] = branches[-30:]
-            links = board.get("branchConnections", [])
-            for node in graph["nodes"]:
-                if node["type"] != "article": continue
-                edge_id = _stable("branch", task["nodeId"] + node["id"])
-                if not any(e["id"] == edge_id for e in links):
-                    links.append({"id": edge_id, "from": task["nodeId"], "to": node["id"], "type": "research_question", "status": "Research question",
-                                  "origin": "system", "claim": "Source retrieved during focused research; inspect the evidence", "evidence": [], "observedAt": now_ms(), "lastVerifiedAt": None})
-            board["branchConnections"] = links[-300:]
+            board["branchAnchors"] = {**{k: v for k, v in board.get("branchAnchors", {}).items() if k in board["branchTopics"]}, child["id"]: task["nodeId"]}
             self.db.put("researchBoard", board["id"], board)
         task.update(status="Complete", updatedAt=now_ms(), message=graph.get("warning") or "Source-backed branch research completed", nodesFound=len(graph["nodes"]))
         self.db.put("researchTask", task_id, task)
