@@ -86,16 +86,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def json(self, value, status=200, cookie=None):
         data = json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "same-origin")
-        if cookie:
-            for item in cookie if isinstance(cookie, list) else [cookie]: self.send_header("Set-Cookie", item)
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "same-origin")
+            if cookie:
+                for item in cookie if isinstance(cookie, list) else [cookie]: self.send_header("Set-Cookie", item)
+            self.end_headers()
+            self.wfile.write(data)
+        except (ConnectionError, TimeoutError):
+            # Client went away before the response finished; nothing left to send.
+            self.close_connection = True
 
     def session(self):
         cookie = SimpleCookie()
