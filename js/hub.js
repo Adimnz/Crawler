@@ -2,12 +2,12 @@
 (() => {
   'use strict';
   const engine = window.CrawlerIntelligence, api = window.CrawlerServer;
-  let destination = 'overview', inspector = 'signal', composing = false, dossierKey = '', lastOps = '', lastWatch = '';
+  let destination = 'overview', inspector = 'signal', inspectorOpen = false, composing = false, dossierKey = '', lastOps = '', lastWatch = '';
   const originalRender = window.IntelligenceUI.render;
   const date = value => value ? new Date(value).toLocaleString() : 'Not available';
   const link = doc => `<a href="${esc(safeURL(doc.url))}" target="_blank" rel="noopener noreferrer">${esc(doc.source || doc.title)} ↗</a>`;
   function mount() {
-    window.CrawlerSignalLimit = 6;
+    window.CrawlerSignalLimit = 24;
     $('tabs').hidden = true;
     $('tabs').setAttribute('aria-hidden', 'true');
     $('filter').placeholder = 'Search topics, companies, sources…';
@@ -30,11 +30,11 @@
     $('signal-list').before(priorityHeading);
     $('signal-list').insertAdjacentHTML('afterend', '<button class="btn sm" id="show-more-signals">Show more signals</button>');
     const market = document.createElement('section'); market.id = 'overview-markets'; market.className = 'overview-section';
-    market.innerHTML = '<div class="hub-section-heading"><h2>Market context</h2><span>Provider quotes · activity · related reporting</span></div><div class="overview-market-table"></div><details id="overview-radar"><summary>New & low-cost assets</summary></details>';
+    market.innerHTML = '<div class="hub-section-heading"><h2>The Mark</h2><span>Provider quotes · activity · related reporting</span></div><div class="overview-market-table"></div><details id="overview-radar"><summary>New & low-cost assets</summary></details>';
     market.querySelector('.overview-market-table').append($('tab-picks'));
     market.querySelector('details').append($('tab-radar'));
     const news = document.createElement('section'); news.id = 'overview-news'; news.className = 'overview-section';
-    news.innerHTML = '<div class="hub-section-heading"><h2>Latest reporting</h2><span>Original links, attribution, and timestamps</span></div>';
+    news.innerHTML = '<div class="hub-section-heading"><h2>Newsstand</h2><span>Original links, attribution, and timestamps</span></div>';
     news.append($('tab-news'));
     news.insertAdjacentHTML('beforeend', '<button class="btn sm" id="show-more-reporting">Show more reporting</button><details class="market-expectations"><summary>Prediction market context</summary></details>');
     news.querySelector('.market-expectations').append($('pmmacro'));
@@ -75,6 +75,10 @@
     simplifyInspector(); renderStatus(); compose();
   }
   function navigate(next) {
+    if (document.body.dataset.experience !== 'workspace') {
+      document.body.dataset.experience = 'workspace'; $('start-screen').hidden = true; $('topic-workspace').hidden = true;
+      window.dispatchEvent(new Event('crawler:experience-change'));
+    }
     destination = next;
     const internal = next === 'watchlist' ? 'workspace' : next === 'operations' ? 'registry' : 'intelligence';
     $('tabs').querySelector('[data-t="' + internal + '"]').click();
@@ -84,8 +88,8 @@
   function focusResearch() { navigate('overview'); $('research-query').focus(); $('research-strip').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
   const PAGES = {
     overview: ['THE RESEARCH DESK', 'Priority signals', 'The developments that matter, with their evidence close at hand.'],
-    markets: ['MARKETS', 'Market context', 'Provider quotes, activity and related reporting for each tracked asset.'],
-    reporting: ['REPORTING', 'Latest reporting', 'Original links, attribution and timestamps from every collected source.'],
+    markets: ['MARKETS', 'The Mark', 'Stock and crypto quotes with provider timestamps. Stale data is labeled.'],
+    reporting: ['REPORTING', 'Newsstand', 'Original links, attribution and timestamps from every collected source.'],
     activity: ['ACTIVITY', 'All collected activity', 'Everything the crawler has collected, newest first.']
   };
   function compose() {
@@ -93,6 +97,7 @@
     const page = PAGES[destination], overview = destination === 'overview', markets = destination === 'markets';
     document.body.dataset.destination = destination;
     document.body.dataset.inspector = inspector;
+    document.body.dataset.inspectorOpen = String(inspectorOpen || inspector !== 'signal');
     if (page) {
       $('tab-intelligence').hidden = false;
       for (const id of ['tab-picks', 'tab-radar', 'tab-news', 'tab-feed']) $(id).hidden = false;
@@ -104,7 +109,7 @@
       if (destination === 'reporting') renderNews(true);
       if (destination === 'activity') { $('overview-stream').open = true; renderStream(); }
     }
-    $('research-detail').hidden = !overview || inspector !== 'signal';
+    $('research-detail').hidden = !overview || inspector !== 'signal' || !inspectorOpen;
     $('detail').hidden = !(overview || markets) || inspector !== 'asset';
     $('assistant-panel').hidden = !overview || inspector !== 'chat';
     $('tab-mentions').hidden = false;
@@ -112,13 +117,13 @@
     if (destination === 'operations') renderOperations();
     if (destination === 'watchlist') { renderServerWorkspace(); window.CrawlerNetwork?.renderPanels(); }
     simplifyInspector(); renderServerDossier(); renderStatus();
-    $('show-more-signals').hidden = $('signal-list').children.length < window.CrawlerSignalLimit;
+    $('show-more-signals').hidden = $('signal-list').querySelectorAll('.signal-card').length < window.CrawlerSignalLimit;
     composing = false;
   }
   function simplifyInspector() {
     const root = $('research-detail');
     if (!root.querySelector('.dossier-head') || root.querySelector('.inspector-actions')) return;
-    const actions = document.createElement('div'); actions.className = 'inspector-actions'; actions.innerHTML = '<button class="btn sm" id="ask-about-signal">Ask about this</button><button class="btn sm" id="investigate-signal">Investigate gaps</button><button class="btn sm" id="review-signal">Review a claim</button>';
+    const actions = document.createElement('div'); actions.className = 'inspector-actions'; actions.innerHTML = '<button class="btn sm" id="close-signal">Close details</button><button class="btn sm" id="ask-about-signal">Ask about this</button><button class="btn sm" id="investigate-signal">Investigate gaps</button><button class="btn sm" id="review-signal">Review a claim</button>';
     root.querySelector('.dossier-head').append(actions);
     const sections = root.querySelector('.dossier-sections');
     const brief = sections.querySelector('section');
@@ -208,7 +213,7 @@
   async function handleClick(event) {
     const b = event.target.closest('button');
     if (event.target.closest('[data-s]') && !event.target.closest('a')) inspector = 'asset';
-    if (b?.dataset.signal) inspector = 'signal';
+    if (b?.dataset.signal) { inspector = 'signal'; inspectorOpen = true; }
     if (!b) return;
     try {
       if (b.dataset.destination) navigate(b.dataset.destination);
@@ -217,6 +222,7 @@
       if (b.id === 'show-more-signals') { window.CrawlerSignalLimit += 12; window.IntelligenceUI.render('intelligence', true); }
       if (b.id === 'show-more-reporting') { const expanded = $('overview-news').classList.toggle('reporting-expanded'); b.textContent = expanded ? 'Show fewer reports' : 'Show more reporting'; }
       if (b.id === 'close-assistant') { inspector = 'signal'; compose(); }
+      if (b.id === 'close-signal') { inspectorOpen = false; compose(); }
       if (b.id === 'close-tools') $('research-tools').close();
       if (b.id === 'retry-server') await api.probe();
       if (b.id === 'ask-about-signal') { const s = window.IntelligenceUI.selectedSignal(); if (s) { $('research-query').value = 'What evidence and uncertainty should I watch for ' + s.title + '?'; focusResearch(); } }
@@ -273,3 +279,4 @@
   window.IntelligenceUI.render = (...args) => { originalRender(...args); if ($('assistant-panel')) compose(); };
   mount();
 })();
+

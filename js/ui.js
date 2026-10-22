@@ -18,6 +18,13 @@ function rowHTML(a, extra = '') {
 }
 
 function renderPicks() {
+  if (document.body.dataset.destination === 'markets') {
+    const q = $('filter').value.trim().toUpperCase();
+    const assets = [...[...live].map(([sym, value]) => ({sym, type:'crypto', ...value})), ...[...quotes].map(([sym, value]) => ({sym, type:'stock', ...value}))]
+      .filter(a => (!typeSel || a.type===typeSel) && (!q || a.sym.includes(q))).sort((a,b) => a.type.localeCompare(b.type) || a.sym.localeCompare(b.sym)).slice(0,200);
+    setHTML($('rows'), assets.map(a => `<button class="market-quote" data-s="${esc(a.sym)}" data-t="${a.type}"><b>${esc(a.sym)} <small>${a.type}</small></b><strong>${Number.isFinite(a.price)?'$'+fmtP(a.price):'Unavailable'}</strong>${chgHTML(a.chg)}<small>${priceFresh(a)?'Provider update':'Stale / unavailable'} · ${a.t?new Date(a.marketAt || a.t).toLocaleTimeString():'No timestamp'}</small></button>`).join('') || '<div class="empty">Waiting for stock and crypto provider quotes. No estimated prices are shown.</div>');
+    return;
+  }
   const q = $('filter').value.trim().toUpperCase();
   const rows = lastAll.filter(a => (!typeSel || a.type === typeSel) && (!q || a.sym.includes(q) || a.name.toUpperCase().includes(q))).sort((a, b) => b.score - a.score).slice(0, 40);
   if (!sel && !userPicked && rows.length) select(rows[0].sym, rows[0].type);
@@ -76,6 +83,15 @@ function renderDetail() {
 
 // Headline set for the last 6h, recomputed at most every 8s.
 const sixHourHeads = () => memo('heads6h', 8000, () => newsPosts.filter(p => p.ts > Date.now() - 6 * 36e5).sort(byTime));
+function categoryPages(items, renderItem) {
+  const groups = new Map();
+  for (const item of items) {
+    const category = item.categories?.[0] || (item.pol ? 'Politics & policy' : 'General');
+    if (!groups.has(category)) groups.set(category, []);
+    groups.get(category).push(item);
+  }
+  return [...groups].map(([category, rows]) => `<section class="category-section"><h2>${esc(category)} <small>${rows.length}</small></h2><div class="category-cards">${rows.map(renderItem).join('')}</div></section>`).join('');
+}
 function renderNews(full) {
   const heads = sixHourHeads();
   const pol = heads.filter(p => p.pol).length, nz = heads.filter(p => Math.abs(p.sent) > .15), neg = nz.filter(p => p.sent < 0).length;
@@ -91,12 +107,12 @@ function renderNews(full) {
   const th = topics('__news', heads, 8).map(([w, k]) => `<span class="chip">${esc(w)} ${k}</span>`).join('');
   setHTML($('read'), heads.length ? `<p>${heads.length} headlines from ${new Set(heads.map(p => p.sub.split(' via ')[0])).size} outlets in the last 6 hours. ${pol} (${Math.round(pol / heads.length * 100)}%) touch politics or regulation. Overall tone is ${tone}.</p>`
     + (covered ? `<div class="rl">Most covered assets</div>${covered}` : '') + (sectors ? `<div class="rl">Policy themes</div>${sectors}` : '') + (th ? `<div class="rl">Topics</div>${th}` : '') : '<div class="dim">Reading major outlets...</div>');
-  setHTML($('headlines'), heads.filter(p => !$('polOnly').checked || p.pol).slice(0, 60).map(cardHTML).join('') || '<div class="empty">No headlines yet.</div>');
+  setHTML($('headlines'), categoryPages(heads.filter(p => (!$('polOnly').checked || p.pol) && (! $('filter').value.trim() || (p.title+' '+p.text+' '+p.sub).toLowerCase().includes($('filter').value.trim().toLowerCase()))).slice(0, 60), cardHTML) || '<div class="empty">No headlines yet.</div>');
   const macro = ext.pm.slice(0, 10);
   setHTML($('pmmacro'), macro.length ? `<div class="sh">What prediction markets are pricing in</div>${macro.map(pmHTML).join('')}` : '<div class="dim sm">Loading prediction markets...</div>');
 }
 function renderStream() {
-  setHTML($('stream'), recentPosts.slice(-300).sort(byTime).slice(0, 50).map(cardHTML).join('') || '<div class="empty">Waiting for posts...</div>');
+  setHTML($('stream'), categoryPages(recentPosts.slice(-300).sort(byTime).filter(p => ! $('filter').value.trim() || (p.title+' '+p.text+' '+p.sub).toLowerCase().includes($('filter').value.trim().toLowerCase())).slice(0, 60), cardHTML) || '<div class="empty">Waiting for posts...</div>');
 }
 
 /* Mentions for the selected asset, with source / mood / reliability filters */
@@ -209,3 +225,4 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) renderAll(); });
 renderAll();
+
