@@ -76,14 +76,14 @@
     $('research-metrics').innerHTML = [[docs.length.toLocaleString(), 'Archived records'], [signals.length, 'Matching signals'], [primary, 'Primary records'], [engine.state.claims.length, 'Reviewed claims']].map(([value, label]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
     const start = engine.state.startedAt, unavailable = !engine.archiveLoaded ? 'Opening evidence archive…' : engine.storageWarning;
     $('coverage-note').textContent = unavailable || (window.CrawlerServer?.connected ? `Server collection · ${$('i-window').value} window · ${signals.filter(s => s.baselineReady).length} signals with an available baseline. 24h scores include server collection history; other windows use the retained browser archive.` : `Collecting since ${date(start)}. ${$('i-window').value} window · ${signals.filter(s => s.baselineReady).length} signals with a complete collection-time baseline. Live sources can be delayed or unavailable.`);
-    $('signal-list').innerHTML = signals.slice(0, window.CrawlerSignalLimit || 60).map((signal, i) => `
+    $('signal-list').innerHTML = categoryPages(signals.slice(0, window.CrawlerSignalLimit || 60), (signal, i) => `
       <article class="signal-card${selected === signal.id ? ' selected' : ''}">
         <div class="signal-top"><span class="signal-number">${String(i + 1).padStart(2, '0')}</span><span class="signal-domains">${esc(signal.categories.join(' · ') || 'General research')}</span><span class="lifecycle">${esc(signal.lifecycle)}</span><button class="save-signal${engine.state.saved.includes(signal.id) ? ' saved' : ''}" data-save="${esc(signal.id)}" aria-label="${engine.state.saved.includes(signal.id) ? 'Remove from' : 'Add to'} watchlist" aria-pressed="${engine.state.saved.includes(signal.id)}">${engine.state.saved.includes(signal.id) ? '★' : '☆'}</button></div>
         <button class="signal-title" data-signal="${esc(signal.id)}">${esc(signal.title)}</button>
         <div class="signal-scores"><div class="momentum-score"><strong>${signal.momentum}<small>/100</small></strong><span>Attention momentum</span></div><div>${badge(signal.status)}<span class="dim sm">${esc(signal.confidence)}</span></div><div><strong>${signal.mentions}<small> records</small></strong><span>${signal.chains} candidate chain${signal.chains === 1 ? '' : 's'}</span></div></div>
         <div class="signal-watch"><span>WATCH NEXT</span><p>${esc(signal.watchNext)}</p></div>
         <div class="signal-bottom"><span>${signal.acceleration == null ? 'Baseline building' : signal.acceleration.toFixed(1) + '× prior window'} · ${signal.primary} primary · ${signal.coverageGaps.length} coverage gaps</span><button data-signal="${esc(signal.id)}">Open research ↗</button></div>
-      </article>`).join('') || empty('Waiting for a research signal', docs.length ? 'No collected records match these filters. Try a longer window or another domain.' : 'The crawler is gathering real records. Source health and custom feeds are available in Source registry.');
+      </article>`) || empty('Waiting for a research signal', docs.length ? 'No collected records match these filters. Try a longer window or another domain.' : 'The crawler is gathering real records. Source health and custom feeds are available in Source registry.');
     if (!selected && signals.length) selected = signals[0].id;
   }
   function renderDetail(force) {
@@ -249,3 +249,4 @@
   window.IntelligenceUI = { render, ask, get selected() { return selected; }, selectedSignal() { return selected ? engine.signalById(selected) : null; } };
   setInterval(pollCustom, 5000);
 })();
+

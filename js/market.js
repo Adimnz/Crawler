@@ -4,7 +4,6 @@ const live = new Map();
 let wsI = 0, ws, lastMsg = 0;
 function connectTicker() {
   if (window.CrawlerServer?.offline) return;
-  if (document.body.dataset.experience && document.body.dataset.experience !== 'workspace') return;
   const me = ws = new WebSocket(WSH[wsI] + '/ws/!miniTicker@arr'); lastMsg = Date.now();
   me.onopen = () => setStatus('Price stream', true, WSH[wsI]);
   me.onmessage = ev => {
@@ -32,7 +31,7 @@ window.addEventListener('crawler:server-state', () => {
 });
 window.addEventListener('crawler:experience-change', () => {
   if (document.body.dataset.experience === 'workspace') { if (!ws) connectTicker(); }
-  else if (ws) { const closing = ws; ws = null; closing.onclose = closing.onerror = null; closing.close(); }
+
 });
 
 /* ---------------- Stock quotes (Yahoo, rotating) ---------------- */
@@ -62,11 +61,11 @@ async function fetchCandles(type, sym, iv, limit = 150) {
 let quoteQueue = [], qi = 0;
 setInterval(async () => {
   if (window.CrawlerServer?.offline || document.hidden) return;
-  if (document.body.dataset.experience && document.body.dataset.experience !== 'workspace') return;
   if (!quoteQueue.length) return;
   const sym = quoteQueue[qi++ % quoteQueue.length];
   if (invalid.has(sym)) return;
   try { const c = await fetchCandles('stock', sym, '5m', 80); mini.set('stock:' + sym, { t: Date.now(), c }); setStatus('Yahoo quotes', true); }
   catch (e) { if (!invalid.has(sym)) setStatus('Yahoo quotes', false, e.message); }
 }, 3000);
+
 

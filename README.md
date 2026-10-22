@@ -28,8 +28,6 @@ On local hardware, adjust `CRAWLER_WORKERS`, `CRAWLER_HTTP_CONNECTIONS`, and `CR
 
 Connected browser tabs display a prominent **server offline** notice and stop live API refreshes once the server is unavailable. Browsers intentionally do not allow a server to forcibly close tabs that it did not open programmatically; external applications and operating-system processes are not killed. Closing the browser window alone does **not** stop an intentionally unattended research server.
 
-**Security:** An earlier commit included a tracked `API KEY.txt` file containing a possible secret. The file has been removed from the current review branch and is now ignored, but it remains in existing Git history. Rotate any credentials that were stored in it and separately clean affected Git history if required. Never store API keys in the repository.
-
 ## Search first
 
 The default page is a centered search bar beneath **“Where do I start”**. Enter a topic, industry, company, or idea. Results open an interactive **Research Observation Board**, followed by the source-linked market brief, drivers, risks, and connected **companies, markets, and financial institutions**. Click **Market brief** to jump directly to the report. **Your topics** reopens previous searches; a fresh visit starts with the clean search screen.
@@ -252,3 +250,39 @@ node CRAWLER/tests/sources-browser.cjs
 The first starts a static server and checks fallback, navigation, review gates, local persistence, search, exports, and responsive layout. The second starts an isolated fixture research server and checks sync, extracted/reviewed claims, citations, monitors, briefs, connectors, replay, and revision deduplication. The market research suite checks a manual connected-model search with background AI off, a cited market brief and three types of watch subjects despite no financial instrument qualification, refreshes and mobile layout. Fixtures never enter the real application database. External providers are blocked during browser tests. Live AI, PostgreSQL, S3, licensed data, PDF, and C2PA adapters need configured integration environments.
 
 Network tests cover entity/relationship citation checks, missing/negated supplier evidence, bylines, review invalidation, source updates, private ownership, exact layout persistence, manual assertion isolation, revisions and bounded tasks. Account tests cover provider contracts, token storage, CSRF rotation, MFA authorization and cross-account denial. The board browser test exercises canvas gestures, group/undo/redo, save/reopen, focused research, responsive layout, account forms and workspace separation.
+
+
+
+## Unified workspace and observation board
+
+The persistent navigation lists saved topics beside Priority Signals, The Mark,
+Newsstand, All Activity, Watchlist, and Sources & System. Topic stop/delete actions
+are above the board. Stop cancels personal branch tasks and prevents further topic
+stages; an already-running provider request may finish before cancellation is
+observed. Shared research remains available to other subscribers. Delete removes
+personal boards and the subscription, retaining collected source evidence.
+
+Priority Signals, Newsstand and All Activity group cards by category. The Mark
+shows provider stock/crypto quotes, timestamps and stale/unavailable labels,
+without research rankings. Sources and ticker connections survive navigation.
+A request timeout triggers a readiness check; three consecutive failed readiness
+checks mark the server disconnected. This fixes a false-offline path, but does not
+prove the cause of every disconnect on a particular installation.
+
+The board uses type colors plus text labels. Selecting a node animates its direct
+connections and dims unrelated nodes to 30%. Reduced-motion settings disable the
+animation. Dragging updates existing nodes/paths once per animation frame and
+suppresses text selection. Sidebars are wider and stack on narrower displays.
+
+Automatic follow-up research prioritizes disputed/review-required relationships
+and unanswered questions, then ownership. It requires automatic AI to be enabled,
+queues at most two tasks per changed evidence fingerprint, and preserves the
+existing eight-active-task and depth limits. Branch answers can produce follow-up
+question investigations within that depth budget. Cost research asks for original
+currency, dates, supplier inputs and evidence for changes; missing or conflicting
+evidence remains uncertainty, not a fact.
+
+Regression checks: `python -m unittest discover -s tests -p 'test_*.py'` and
+`node --test tests/research.test.cjs tests/connection.test.cjs`. Browser gesture
+and visual tests remain in `tests/*-browser.cjs` and require a local Chromium
+installation and `PLAYWRIGHT_MODULE` / `CHROME_PATH` configuration.

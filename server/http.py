@@ -391,7 +391,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception: self.json({"error": "Private research could not be updated"}, 500, cookie)
             return
         account = self.account_session()
-        account_topics = bool(account and not service.accounts.public(account)["needsMfa"] and path in {"/api/topics", "/api/topics/refresh", "/api/topics/toggle"})
+        account_topics = bool(account and not service.accounts.public(account)["needsMfa"] and path in {"/api/topics", "/api/topics/refresh", "/api/topics/toggle", "/api/topics/delete"})
         if not self.is_owner(session) and not account_topics:
             self.json({"error": "Owner sign-in is required"}, 401, cookie)
             return
@@ -433,6 +433,11 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/topics/refresh":
                 if account and not any(r["ownerId"] == account["user"]["id"] and r["topicId"] == body.get("id") for r in service.db.latest("accountTopic", 10000)): raise ValueError("Research topic not found")
                 result = service.topics.refresh(body.get("id", ""))
+            elif path == "/api/topics/delete":
+                owner = self.principal(session)
+                if account and not any(r["ownerId"] == owner and r["topicId"] == body.get("id") for r in service.db.latest("accountTopic", 10000)) and not any(b["topicId"] == body.get("id") for b in service.network_research.list_boards(owner)):
+                    raise ValueError("Research topic not found")
+                result = service.topics.delete(body.get("id", ""), owner)
             elif path == "/api/topics/toggle":
                 if account:
                     link_id = analysis.digest(account["user"]["id"] + str(body.get("id", "")))
@@ -440,8 +445,10 @@ class Handler(BaseHTTPRequestHandler):
                     if not link or link["ownerId"] != account["user"]["id"]: raise ValueError("Research topic not found")
                     link["enabled"] = body.get("enabled") is True
                     service.db.put("accountTopic", link_id, link)
+                    if link["enabled"]: service.topics.configure(link["topicId"], {"enabled": True})
+                    else: service.topics.stop(link["topicId"], account["user"]["id"])
                     result = {**service.topics.get(link["topicId"]), "enabled": link["enabled"]}
-                else: result = service.topics.configure(body.get("id", ""), {"enabled": bool(body.get("enabled"))})
+                else: result = service.topics.configure(body.get("id", ""), {"enabled": True}) if body.get("enabled") else service.topics.stop(body.get("id", ""))
             elif path == "/api/ai/settings":
                 result = service.ai_settings.configure(body)
             elif path == "/api/ai/connect":
@@ -540,3 +547,4 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:; img-src 'self' data: https:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
         self.end_headers()
         self.wfile.write(content)
+

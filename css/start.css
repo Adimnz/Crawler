@@ -70,3 +70,13 @@ body[data-experience="workspace"] .start-ai-button{padding:5px 10px;font-size:10
 }
 .crawler-stop-button[hidden], .crawler-server-lifecycle[hidden] { display: none !important; }
 .crawler-stop-button { font-size: 12px; }
+
+
+/* One persistent workspace shell for search and topic research. */
+body[data-experience="start"],body[data-experience="topic"]{margin-left:var(--hub-rail)}
+body[data-experience="start"]>.app-rail,body[data-experience="topic"]>.app-rail{display:flex!important}
+#topic-workspace:has(.research-network){width:100%;max-width:none;padding:24px}
+#rail-topics{margin-top:24px;overflow:auto;min-height:100px;max-height:35vh}
+.rail-topic{display:block;width:100%;padding:10px;text-align:left;background:transparent;border:0;color:#becbc8;cursor:pointer;border-radius:6px;overflow-wrap:anywhere}
+.rail-topic small{display:block;color:#84958d;font-size:10px;margin-top:5px}.rail-topic.on,.rail-topic:hover{background:#24352f}
+@media(max-width:760px){body[data-experience="start"],body[data-experience="topic"]{margin-left:0}.app-rail{position:relative!important;width:100%!important;max-height:260px;overflow:auto}#topic-workspace:has(.research-network){padding:12px}}

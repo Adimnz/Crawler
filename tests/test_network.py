@@ -73,6 +73,14 @@ class NetworkTests(unittest.TestCase):
             self.assertEqual(self.n.run_task(task["id"])["status"], "Paused")
             self.assertNotIn("childTopicId", self.s.db.get("researchTask", task["id"]))
 
+    def test_automatic_followup_prioritizes_questions_and_deduplicates(self):
+        self.s.auto_ai = True
+        detail = self.board()
+        self.assertTrue(any(t["focus"] == "questions" for t in detail["tasks"]))
+        before = len(detail["tasks"])
+        self.n._automatic_branches(detail["board"], detail["graph"])
+        self.assertEqual(len(self.n.board("alice", detail["board"]["id"])["tasks"]), before)
+
     def test_common_ownership_does_not_admit_an_unsupported_supplier_link(self):
         self.result["relationships"].append({**self.result["relationships"][0], "from": "company", "to": "other", "type": "supplied_by"})
         graph = self.n.build(self.topic["id"], True)
@@ -256,3 +264,4 @@ class NetworkTests(unittest.TestCase):
 
 
 if __name__ == "__main__": unittest.main()
+

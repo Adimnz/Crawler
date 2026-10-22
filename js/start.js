@@ -26,7 +26,7 @@
     navigationVersion++;
     current = topic; document.body.dataset.experience = 'topic'; $('start-screen').hidden = true; $('topic-workspace').hidden = false;
     window.dispatchEvent(new Event('crawler:experience-change'));
-    renderTopic(); renderRecentButton();
+    renderTopic(); renderRecentButton(); loadRecent(true);
   }
   async function openTopic(id) {
     const navigation = navigationVersion;
@@ -85,8 +85,9 @@
     const retainedBoard = window.CrawlerNetwork?.detail?.board.topicId === p.id ? $('research-network') : null;
     const boardFocus = retainedBoard?.contains(active) ? {element:active,start:active.selectionStart,end:active.selectionEnd} : null;
     const savedDetails = [...$('topic-workspace').querySelectorAll('details[open]')].map(d => d.dataset.topicSection);
-    $('topic-workspace').innerHTML = `<div class="topic-search-row"><form id="topic-search-form" class="start-search" role="search"><label class="sr-only" for="topic-query">Research another topic</label><input id="topic-query" maxlength="500" value="${esc(typedQuery ?? p.query)}" placeholder="Research another topic…" required><button type="submit" aria-label="Research this topic">↗</button></form></div><section id="research-network" class="research-network" aria-label="Research observation board"></section>
-      <div class="topic-head"><div><span class="topic-state ${busy ? 'busy' : ''}"><i></i>${esc(state)}${p.enabled === false ? ' · automatic updates paused' : ''}</span><h1>${esc(p.title || p.query)}</h1><p>Market research and a watchlist of the companies, markets and financial institutions connected to your topic.</p></div><div class="topic-head-actions"><button class="btn sm" id="refresh-topic"${busy ? ' disabled' : ''}>${busy ? 'Research in progress' : 'Research again'}</button><button class="btn sm" id="toggle-topic">${p.enabled === false ? 'Resume updates' : 'Pause updates'}</button></div></div>
+    $('topic-workspace').innerHTML = `<div class="topic-search-row"><form id="topic-search-form" class="start-search" role="search"><label class="sr-only" for="topic-query">Research another topic</label><input id="topic-query" maxlength="500" value="${esc(typedQuery ?? p.query)}" placeholder="Research another topic…" required><button type="submit" aria-label="Research this topic">↗</button></form></div>
+      <div class="topic-head"><div><span class="topic-state ${busy ? 'busy' : ''}"><i></i>${esc(state)}${p.enabled === false ? ' · automatic updates paused' : ''}</span><h1>${esc(p.title || p.query)}</h1><p>Market research and a watchlist of the companies, markets and financial institutions connected to your topic.</p></div><div class="topic-head-actions"><button class="btn sm" id="refresh-topic"${busy ? ' disabled' : ''}>${busy ? 'Research in progress' : 'Research again'}</button><button class="btn sm" id="toggle-topic">${p.enabled === false ? 'Resume research' : 'Stop research'}</button><button class="btn sm" id="delete-topic">Delete topic</button></div></div>
+      <section id="research-network" class="research-network" aria-label="Research observation board"></section>
       ${aiError && !busy ? `<div class="topic-ai-notice" role="status"><span>${safeText(aiError.message)} ${records.length ? 'Collected source research is shown below.' : 'Review the connection and research again.'}</span><button class="btn sm" data-openai-connect>OpenAI settings ↗</button></div>` : settings && !settings.configured ? '<div class="topic-ai-notice"><span>Connect OpenAI to research this topic across your collected sources and expand coverage.</span><button class="btn sm" data-openai-connect>Connect AI ↗</button></div>' : ''}
       <nav class="topic-statline" aria-label="Jump to topic information">${groups.map(([kind, label]) => `<a href="#topic-watch-${kind}"><b>${subjects.filter(s => s.kind === kind).length}</b>${label.toLowerCase()}</a>`).join('')}<a href="#topic-sources"><b>${records.length}</b>source records</a><span>Updated ${date(p.lastRunAt || p.updatedAt)}</span></nav>
       <p id="topic-feedback" class="form-feedback" role="status"></p>${busy ? `<p class="topic-progress" role="status">${esc(p.progress || 'Collecting sources and researching your topic.')} You can leave this page while research continues.</p>` : ''}<div class="topic-layout"><div><section class="topic-block topic-report" id="topic-research"><div class="topic-section-heading"><h2>Market research</h2>${report.method ? `<span>${esc(report.method)}${report.model ? ' · ' + esc(report.model) : ''}</span>` : ''}</div>${hasReport ? `${researchFindings(summary, 'summary')}<div class="topic-research-columns">${report.drivers?.length ? `<section><h3>Market drivers</h3>${researchFindings(report.drivers, 'drivers')}</section>` : ''}${report.risks?.length ? `<section><h3>Risks & uncertainties</h3>${researchFindings(report.risks, 'risks')}</section>` : ''}</div><p class="topic-report-note">${report.method === 'OpenAI source research' ? 'AI analysis with supporting source passages. ' : ''}Source reports remain subject to verification.</p>` : `<div class="topic-empty"><b>${busy ? 'Building your market brief…' : records.length ? 'Collected sources are ready to review.' : 'This topic needs more source coverage.'}</b>${busy ? 'The server is reading relevant sources, identifying connected organizations and investigating market drivers.' : records.length ? 'Research again to generate a current brief from the connected OpenAI model.' : 'Connect OpenAI for research and source discovery, or add relevant feeds in Sources & System.'}</div>`}</section>
@@ -121,6 +122,9 @@
   }
   function renderRecentButton() {
     $('recent-topics-button')?.remove();
+    let list = $('rail-topics');
+    if (!list) { list = document.createElement('div'); list.id = 'rail-topics'; document.querySelector('.rail-shortcuts').before(list); }
+    list.innerHTML = '<div class="rail-label">YOUR TOPICS</div><button class="rail-link" id="rail-new-topic">+ New topic</button>' + recent.map(t => `<button class="rail-topic ${current?.id===t.id && document.body.dataset.experience==='topic'?'on':''}" data-open-topic="${esc(t.id)}" aria-current="${current?.id===t.id?'page':'false'}">${esc(t.title || t.query)}<small>${esc(t.enabled===false?'Stopped':t.state || 'Saved')}</small></button>`).join('');
     if (!recent.length || document.body.dataset.experience !== 'start') return;
     const button = document.createElement('button'); button.id = 'recent-topics-button'; button.className = 'topic-recent'; button.textContent = 'Your topics · ' + recent.length;
     button.onclick = () => {
@@ -198,7 +202,7 @@
     const button = event.target.closest('button'); if (!button) return;
     try {
       if (button.id === 'open-workspace' || button.id === 'topic-open-workspace') showWorkspace();
-      if (button.id === 'new-topic-search') showStart();
+      if (button.id === 'new-topic-search' || button.id === 'rail-new-topic') showStart();
       if (button.matches('[data-openai-connect]')) await openConnection();
       if (button.id === 'close-openai-connection') dialog.close();
       if (button.id === 'load-openai-models') await loadModels();
@@ -206,6 +210,10 @@
         const id = current.id, result = await api.request(button.id === 'refresh-topic' ? 'topics/refresh' : 'topics/toggle', { id, ...(button.id === 'toggle-topic' ? { enabled: !current.enabled } : {}) });
         if (current?.id === id) { current = result; renderTopic(); }
       }
+      if (button.id === 'delete-topic' && current && confirm('Delete this topic and its boards from your workspace? Collected source records are retained.')) {
+        await api.request('topics/delete', {id: current.id}); current = null; await loadRecent(true); showWorkspace();
+      }
+      if (button.id === 'toggle-topic') await loadRecent(true);
       if (button.dataset.openTopic) { $('recent-topics-dialog')?.close(); await openTopic(button.dataset.openTopic); }
       if (button.id === 'test-openai-connection') { button.disabled = true; try { await testConnection(); } finally { button.disabled = false; } }
       if (button.id === 'disconnect-openai') { settings = await api.request('ai/settings', { disconnect: true }); await openConnection(); updateConnectionStatus(); renderTopic(); }
@@ -251,3 +259,4 @@
   window.CrawlerStart = { showStart, showWorkspace, openTopic, search };
   setInterval(pollTopic, 12000); loadSettings(); loadRecent();
 })();
+

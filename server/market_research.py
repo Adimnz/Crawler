@@ -273,7 +273,7 @@ def research_topic(ai, query, documents, previous=None):
         "Keep this report compact: aim for two or three short summary findings, two or three drivers, two or three risks, "
         "and six to nine subjects only when supported. Fewer subjects and empty sections are valid when the sources are "
         "limited. Prefer one short quote of about one sentence per item and reuse source citations instead of long extracts. "
-        "Use at most six findings per section, eighteen subjects, and eight short nextQuestions."
+        "For uncertain answers, generate precise follow-up questions that could resolve them. Examine who makes or supplies what, disclosed costs with currency and date, cost changes and supported causes. Reassess contradictions rather than presenting both claims as established. Use at most six findings per section, eighteen subjects, and eight short nextQuestions."
     )
     try:
         result = ai.structured("market_topic_research", SCHEMA, instructions, {"topic": query.strip(), "previous": prior,
@@ -337,3 +337,4 @@ def research_topic(ai, query, documents, previous=None):
     if withheld:
         report["limitations"].append(str(withheld) + " model item(s) were withheld because citation, identity, or research bounds were not satisfied.")
     return report
+
