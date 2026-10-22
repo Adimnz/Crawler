@@ -64,11 +64,11 @@ function job(name, fn, ms, delay = 0) {
     // Do not silently fall back to browser collectors when the Python server stops.
     if (window.CrawlerServer?.offline) return setTimeout(run, 60000);
     if (document.hidden) return setTimeout(run, 5000);
-    if (document.body.dataset.experience && document.body.dataset.experience !== 'workspace') return setTimeout(run, 5000);
     if (window.CrawlerServer?.connected && !['Prediction markets'].includes(name)) return setTimeout(run, Math.max(ms, 15000));
     try { await fn(); fails = 0; setStatus(name, true); } catch (e) { fails++; setStatus(name, false, e.message); }
     setTimeout(run, fails ? ms * Math.min(8, 2 ** fails) : ms);
   };
   setTimeout(run, delay + Math.random() * 1500);
 }
+
 
