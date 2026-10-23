@@ -26,6 +26,7 @@ from .ai_settings import AISettings
 from .topics import TopicResearch
 from .research_network import ResearchNetwork
 from .accounts import AccountAuth
+from .recommendations import RecommendationEngine
 
 
 class ResearchService:
@@ -47,6 +48,7 @@ class ResearchService:
         self.topics = TopicResearch(self)
         self.network_research = ResearchNetwork(self)
         self.accounts = AccountAuth(self, directory)
+        self.recommendations = RecommendationEngine(self)
         if seed:
             from .source_catalog import URL_REPAIRS
             registered_urls = {s["url"] for s in self.db.list("source")}
@@ -81,7 +83,7 @@ class ResearchService:
         parsed = urlsplit(url)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("Enter a public HTTPS source URL without credentials")
-        if values.get("kind", "rss") not in {"rss", "json", "fred", "coingecko", "sec", "fred_vintages", "coingecko_asset"}:
+        if values.get("kind", "rss") not in {"rss", "json", "fred", "coingecko", "sec", "fred_vintages", "coingecko_asset", "equity_daily"}:
             raise ValueError("Choose a supported RSS, JSON, SEC, FRED, or CoinGecko connector")
         name = str(values.get("name", "")).strip()[:120]
         if not name:
@@ -743,7 +745,7 @@ class ResearchService:
         if source["kind"] == "sec" and source.get("config", {}).get("discoveryOnly"):
             self.investments.discover()
             result = {"raw": b'{"scope":"Official identity catalogue discovery only"}'}
-        elif source["kind"] in {"sec", "fred_vintages", "coingecko_asset"}:
+        elif source["kind"] in {"sec", "fred_vintages", "coingecko_asset", "equity_daily"}:
             from .financial_connectors import collect_financial_source
             result = collect_financial_source(source, self.network)
         else:
@@ -830,6 +832,8 @@ class ResearchService:
             self.investments.coordinate(payload["assetId"], payload["version"])
         elif job["kind"] == "topic-research":
             self.topics.run(payload["topicId"])
+        elif job["kind"] == "recommendation-review":
+            if self.db.get("researchBoard", payload["boardId"]): self.recommendations.board(payload["ownerId"], payload["boardId"])
         elif job["kind"] == "network-index":
             self.network_research.build(payload["topicId"], use_ai=payload.get("useAI", False))
         elif job["kind"] == "network-research":
@@ -897,6 +901,7 @@ class ResearchService:
                 if at - last_monitor >= 30000:
                     self.evaluate_monitors()
                     self.topics.refresh_due()
+                    self.recommendations.queue_due(at)
                     last_monitor = at
                 if at - last_analysis >= 300000:
                     for event in self.db.latest("event", 300):
@@ -951,3 +956,4 @@ class ResearchService:
                 except OSError:
                     pass
         return [thread.name for thread in self.threads if thread.is_alive()]
+

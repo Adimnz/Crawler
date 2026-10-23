@@ -286,3 +286,15 @@ Regression checks: `python -m unittest discover -s tests -p 'test_*.py'` and
 `node --test tests/research.test.cjs tests/connection.test.cjs`. Browser gesture
 and visual tests remain in `tests/*-browser.cjs` and require a local Chromium
 installation and `PLAYWRIGHT_MODULE` / `CHROME_PATH` configuration.
+
+
+## Topic investment recommendations
+
+The observation board now includes source-linked asset candidates, a fixed
+historical-analogue price model, purged chronological validation, conditional
+return ranges, cost inputs, expiration and versioned recommendation changes.
+Missing data, contradictions or failed validation return **Wait / insufficient
+evidence**. Numerical article-to-return effects are not fabricated. See
+[the recommendation methodology and setup](docs/TOPIC_RECOMMENDATIONS.md) for the
+exact gates, historical availability limits, optional adjusted daily equity
+connector, background refresh and remaining model limitations.

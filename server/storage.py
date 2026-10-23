@@ -59,6 +59,7 @@ class Database:
         if self.dsn and not self.postgres:
             raise ValueError("DATABASE_URL must be a PostgreSQL connection URL")
         self.lock = threading.RLock()
+        self.kind_revisions = {}
         with self.connection() as conn:
             for statement in SCHEMA.split(";"):
                 if statement.strip():
@@ -99,7 +100,18 @@ class Database:
         at = at or now_ms()
         with self.lock, self.connection() as conn:
             self.execute(conn, "INSERT INTO records(kind,id,payload,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at", (kind, record_id, dumps(payload), at, at))
+            self.kind_revisions[kind] = self.kind_revisions.get(kind, 0) + 1
         return payload
+
+    def scan(self, kind, page_size=500):
+        """Keyset iteration: no silent latest-N truncation, bounded read batches."""
+        cursor = ""
+        while True:
+            with self.connection() as conn:
+                rows = self.execute(conn, "SELECT id,payload FROM records WHERE kind=? AND id>? ORDER BY id LIMIT ?", (kind, cursor, page_size)).fetchall()
+            if not rows: return
+            for row in rows: yield json.loads(row["payload"])
+            cursor = rows[-1]["id"]
 
     def list(self, kind, limit=5000, after=0):
         with self.connection() as conn:
@@ -109,6 +121,7 @@ class Database:
     def delete(self, kind, record_id):
         with self.lock, self.connection() as conn:
             self.execute(conn, "DELETE FROM records WHERE kind=? AND id=?", (kind, record_id))
+            self.kind_revisions[kind] = self.kind_revisions.get(kind, 0) + 1
 
     def count(self, kind):
         with self.connection() as conn:
@@ -279,3 +292,4 @@ class ObjectStore:
         if self.client:
             return self.client.get_object(Bucket=self.bucket, Key="raw/" + key)["Body"].read()
         return (self.root / key).read_bytes()
+

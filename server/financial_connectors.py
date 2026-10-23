@@ -489,9 +489,56 @@ def _collect_fred_many(source, network):
                          "truncated": any(result["metadata"]["truncated"] for result in results), "pagesPerSeries": pages}}
 
 
+def _collect_equity_daily(source, network):
+    """Adjusted daily equity prices; identity comes from the SEC catalogue.
+
+    Historical values have unknown original-publication availability and cannot
+    become point-in-time backtests merely because the provider supplies a date.
+    """
+    config = source.get("config", {})
+    symbol = str(config.get("ticker", "")).upper()
+    asset_id = str(config.get("assetId", ""))
+    matches = [asset for asset in _ticker_catalogue(network) if asset.get("ticker") == symbol and asset["id"] == asset_id]
+    if len(matches) != 1: raise ConnectorError("Choose an SEC-resolved assetId and its exact ticker before collecting daily prices")
+    asset = matches[0]
+    secret = os.getenv("ALPHAVANTAGE_API_KEY", "")
+    if not secret: raise ConnectorError("Configure ALPHAVANTAGE_API_KEY on the server")
+    base = "https://www.alphavantage.co/query"
+    # The secret is request-only: stored source URLs and metadata never contain it.
+    try:
+        overview, _, _, _ = _json(network, base + "?" + urlencode({"function":"OVERVIEW", "symbol":symbol, "apikey":secret}))
+        if overview.get("Symbol") != symbol or not overview.get("Currency"):
+            raise ConnectorError("Provider identity/currency data are unavailable, rate limited or ambiguous")
+        outputsize = config.get("outputsize", "compact")
+        if outputsize not in {"compact", "full"}: raise ConnectorError("outputsize must be compact or full")
+        payload, _, _, _ = _json(network, base + "?" + urlencode({"function":"TIME_SERIES_DAILY_ADJUSTED", "symbol":symbol, "outputsize":outputsize, "apikey":secret}))
+    except Exception:
+        raise ConnectorError("Adjusted daily equity collection failed; check provider entitlement, rate limits and server credentials") from None
+    if payload.get("Meta Data", {}).get("2. Symbol") != symbol:
+        raise ConnectorError("Adjusted daily provider response has no matching symbol; check API entitlement or rate limits")
+    series = payload.get("Time Series (Daily)")
+    if not isinstance(series, dict): raise ConnectorError("Adjusted daily history is unavailable")
+    today = dt.datetime.now(dt.timezone.utc).date().isoformat()
+    observations = []
+    source_url = base + "?" + urlencode({"function":"TIME_SERIES_DAILY_ADJUSTED", "symbol":symbol, "outputsize":outputsize})
+    for session, values in sorted(series.items())[-1500:]:
+        value = _number(values.get("5. adjusted close"))
+        if not _date(session) or session >= today or value is None or value <= 0: continue
+        observations.append({"assetId":asset_id,"assetClass":"equity","metric":"adjusted_close", "value":value,
+            "unit":overview["Currency"],"currency":overview["Currency"], "frequency":"daily", "adjustment":"dividend-adjusted",
+            "session":session,"observedAt":timestamp(session + "T23:59:59Z"), "sourceUrl":source_url,
+            "historicalAvailabilityUnknown":True,"availabilityBasis":"First local retrieval; original publication time unknown",
+            "provider":"Alpha Vantage","adjustedPriceNotExecutable":True})
+    return {"assets":[asset],"documents":[],"observations":observations,
+            "raw":json.dumps({"overview":overview,"daily":payload}).encode(),"resolvedUrl":source_url,
+            "metadata":{"provider":"Alpha Vantage", "backfilled":True,"adjustments":"splits and cash dividends", "sessionsReceived":len(series),"sessionsStored":len(observations)}}
+
+
 def collect_financial_source(source, network):
     """Return assets/documents/observations/raw using the normal connector convention."""
     kind = source.get("kind")
+    if kind == "equity_daily":
+        return _collect_equity_daily(source, network)
     if kind == "sec":
         return _collect_sec(source, network)
     if kind in {"fred_vintages", "alfred"}:
@@ -499,3 +546,4 @@ def collect_financial_source(source, network):
     if kind == "coingecko_asset":
         return _collect_coin(source, network)
     raise ConnectorError("Unsupported financial connector type")
+
