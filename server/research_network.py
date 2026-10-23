@@ -435,6 +435,10 @@ class ResearchNetwork:
     def delete_board(self, owner, board_id):
         self._owned("researchBoard", board_id, owner)
         self.db.delete("researchBoard", board_id)
+        self.db.delete("recommendationSnapshot", board_id)
+        for row in self.db.scan("recommendationRevision"):
+            if row.get("boardId") == board_id and row.get("ownerId") == owner:
+                self.db.delete("recommendationRevision", board_id + ":" + str(row["revision"]))
         for portfolio in self.db.latest("researchPortfolio", 10000):
             if portfolio["ownerId"] != owner: continue
             kept = [item for item in portfolio.get("items", []) if item.get("boardId") != board_id]
@@ -618,4 +622,5 @@ class ResearchNetwork:
                 self.db.put("networkGraph", graph["id"], graph)
                 self.db.put("networkRevision", graph["id"] + ":v" + str(graph["version"]), graph)
         return edge
+
 

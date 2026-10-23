@@ -173,6 +173,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/my-research": return service.network_research.personal(owner)
         if path == "/api/my-research/export": return service.network_research.export_personal(owner)
         if path == "/api/network-node": return service.network_research.inspect(owner, value("boardId"), value("id"))
+        if path == "/api/board-recommendations": return service.recommendations.board(owner, value("boardId"))
         raise ValueError("Unknown private research route")
 
     def private_post(self, path, body, session):
@@ -222,7 +223,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 self.json({"service": "trend-crawler", "ready": False, "error": "Research storage is temporarily unavailable"}, 503, cookie)
             return
-        if path in {"/api/boards", "/api/my-research", "/api/my-research/export", "/api/network-node"}:
+        if path in {"/api/boards", "/api/my-research", "/api/my-research/export", "/api/network-node", "/api/board-recommendations"}:
             try: self.json(self.private_read(path, session), cookie=cookie)
             except PermissionError as exc: self.json({"error": str(exc)}, 401, cookie)
             except (ValueError, KeyError) as exc: self.json({"error": str(exc)}, 400, cookie)
@@ -449,6 +450,8 @@ class Handler(BaseHTTPRequestHandler):
                     else: service.topics.stop(link["topicId"], account["user"]["id"])
                     result = {**service.topics.get(link["topicId"]), "enabled": link["enabled"]}
                 else: result = service.topics.configure(body.get("id", ""), {"enabled": True}) if body.get("enabled") else service.topics.stop(body.get("id", ""))
+            elif path == "/api/recommendations/settings":
+                result = service.recommendations.configure(body)
             elif path == "/api/ai/settings":
                 result = service.ai_settings.configure(body)
             elif path == "/api/ai/connect":
@@ -547,4 +550,5 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:; img-src 'self' data: https:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
         self.end_headers()
         self.wfile.write(content)
+
 
