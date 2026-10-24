@@ -18,7 +18,7 @@
     document.body.append(dialog);
     $('filter').addEventListener('input', event => { assetQuery = event.target.value.trim().toLowerCase(); render(false); });
     const shortcut = document.createElement('button'); shortcut.dataset.jump = 'asset-research'; shortcut.textContent = 'Asset research ↗';
-    document.querySelector('.rail-shortcuts .rail-label').after(shortcut);
+    document.querySelector('.rail-shortcuts').append(shortcut);
     document.addEventListener('click', async event => {
       const button = event.target.closest('button'); if (!button) return;
       try {

@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
 import ipaddress
 import json
+import sys
 import mimetypes
 import os
 from pathlib import Path
@@ -24,6 +25,12 @@ from .research_network import BoardConflict
 class AppServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 32
+
+    def handle_error(self, request, client_address):
+        # Browsers abort sockets when pages navigate or requests are cancelled; that is not a server fault.
+        if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
 
     def process_request(self, request, client_address):
         # ThreadingHTTPServer otherwise creates an unbounded thread per connection.
@@ -169,6 +176,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/my-research": return service.network_research.personal(owner)
         if path == "/api/my-research/export": return service.network_research.export_personal(owner)
         if path == "/api/network-node": return service.network_research.inspect(owner, value("boardId"), value("id"))
+        if path == "/api/board-recommendations": return service.recommendations.board(owner, value("boardId"))
         raise ValueError("Unknown private research route")
 
     def private_post(self, path, body, session):
@@ -218,14 +226,14 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 self.json({"service": "trend-crawler", "ready": False, "error": "Research storage is temporarily unavailable"}, 503, cookie)
             return
-        if path in {"/api/boards", "/api/my-research", "/api/my-research/export", "/api/network-node"}:
+        if path in {"/api/boards", "/api/my-research", "/api/my-research/export", "/api/network-node", "/api/board-recommendations"}:
             try: self.json(self.private_read(path, session), cookie=cookie)
             except PermissionError as exc: self.json({"error": str(exc)}, 401, cookie)
             except (ValueError, KeyError) as exc: self.json({"error": str(exc)}, 400, cookie)
             except Exception: self.json({"error": "Private research could not be loaded"}, 500, cookie)
             return
         account = self.account_session()
-        public_reads = {"/api/sources", "/api/documents", "/api/events", "/api/investment", "/api/topics", "/api/ai/settings", "/api/asset-profile", "/api/cross-market-report", "/api/observations", "/api/asset-assessments", "/api/dossier", "/api/graph", "/api/document-versions", "/api/event-study"}
+        public_reads = {"/api/source-items", "/api/sources", "/api/documents", "/api/events", "/api/investment", "/api/topics", "/api/ai/settings", "/api/asset-profile", "/api/cross-market-report", "/api/observations", "/api/asset-assessments", "/api/dossier", "/api/graph", "/api/document-versions", "/api/event-study"}
         account_allowed = bool(account and not self.server.service.accounts.public(account)["needsMfa"] and path in public_reads)
         if not self.is_owner(session) and not account_allowed:
             self.json({"error": "Owner sign-in is required"}, 401, cookie)
@@ -236,6 +244,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/sources":
                 result = {"sources": [service.public_source(source) for source in service.db.list("source")]}
+            elif path == "/api/source-items":
+                result = service.source_items(value("id"))
             elif path == "/api/documents":
                 result = service.documents(int(value("after", 0)), value("afterId"), max(1, min(500, int(value("limit", 300)))))
             elif path == "/api/events":
@@ -385,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception: self.json({"error": "Private research could not be updated"}, 500, cookie)
             return
         account = self.account_session()
-        account_topics = bool(account and not service.accounts.public(account)["needsMfa"] and path in {"/api/topics", "/api/topics/refresh", "/api/topics/toggle"})
+        account_topics = bool(account and not service.accounts.public(account)["needsMfa"] and path in {"/api/topics", "/api/topics/refresh", "/api/topics/toggle", "/api/topics/delete"})
         if not self.is_owner(session) and not account_topics:
             self.json({"error": "Owner sign-in is required"}, 401, cookie)
             return
@@ -398,7 +408,9 @@ class Handler(BaseHTTPRequestHandler):
                 source = service.db.get("source", body.get("id", ""))
                 if not source or not source.get("enabled"):
                     raise ValueError("Enable the registered source before polling it")
-                result = {"jobId": service.db.enqueue("poll", {"sourceId": source["id"]}, "manual:" + source["id"] + ":" + str(now_ms() // 60000))}
+                result = {"jobId": service.queue_source_poll(source["id"], manual=True)}
+            elif path == "/api/sources/poll-all":
+                result = {"jobIds": [service.queue_source_poll(s["id"], manual=True) for s in service.db.list("source") if s.get("enabled")]}
             elif path == "/api/documents/import":
                 result = service.import_document(body)
             elif path == "/api/documents/fetch":
@@ -425,6 +437,11 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/topics/refresh":
                 if account and not any(r["ownerId"] == account["user"]["id"] and r["topicId"] == body.get("id") for r in service.db.latest("accountTopic", 10000)): raise ValueError("Research topic not found")
                 result = service.topics.refresh(body.get("id", ""))
+            elif path == "/api/topics/delete":
+                owner = self.principal(session)
+                if account and not any(r["ownerId"] == owner and r["topicId"] == body.get("id") for r in service.db.latest("accountTopic", 10000)) and not any(b["topicId"] == body.get("id") for b in service.network_research.list_boards(owner)):
+                    raise ValueError("Research topic not found")
+                result = service.topics.delete(body.get("id", ""), owner)
             elif path == "/api/topics/toggle":
                 if account:
                     link_id = analysis.digest(account["user"]["id"] + str(body.get("id", "")))
@@ -432,8 +449,12 @@ class Handler(BaseHTTPRequestHandler):
                     if not link or link["ownerId"] != account["user"]["id"]: raise ValueError("Research topic not found")
                     link["enabled"] = body.get("enabled") is True
                     service.db.put("accountTopic", link_id, link)
+                    if link["enabled"]: service.topics.configure(link["topicId"], {"enabled": True})
+                    else: service.topics.stop(link["topicId"], account["user"]["id"])
                     result = {**service.topics.get(link["topicId"]), "enabled": link["enabled"]}
-                else: result = service.topics.configure(body.get("id", ""), {"enabled": bool(body.get("enabled"))})
+                else: result = service.topics.configure(body.get("id", ""), {"enabled": True}) if body.get("enabled") else service.topics.stop(body.get("id", ""))
+            elif path == "/api/recommendations/settings":
+                result = service.recommendations.configure(body)
             elif path == "/api/ai/settings":
                 result = service.ai_settings.configure(body)
             elif path == "/api/ai/connect":
@@ -532,3 +553,5 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:; img-src 'self' data: https:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
         self.end_headers()
         self.wfile.write(content)
+
+

@@ -2,12 +2,12 @@
 (() => {
   'use strict';
   const engine = window.CrawlerIntelligence, api = window.CrawlerServer;
-  let destination = 'overview', inspector = 'signal', composing = false, dossierKey = '', lastOps = '', lastWatch = '';
+  let destination = 'overview', inspector = 'signal', inspectorOpen = false, composing = false, dossierKey = '', lastOps = '', lastWatch = '';
   const originalRender = window.IntelligenceUI.render;
   const date = value => value ? new Date(value).toLocaleString() : 'Not available';
   const link = doc => `<a href="${esc(safeURL(doc.url))}" target="_blank" rel="noopener noreferrer">${esc(doc.source || doc.title)} ↗</a>`;
   function mount() {
-    window.CrawlerSignalLimit = 6;
+    window.CrawlerSignalLimit = 24;
     $('tabs').hidden = true;
     $('tabs').setAttribute('aria-hidden', 'true');
     $('filter').placeholder = 'Search topics, companies, sources…';
@@ -19,7 +19,6 @@
     researchStrip.innerHTML = '<div><span class="assistant-symbol">✧</span><b>Ask your research</b><span class="dim sm">An answer is only as useful as its evidence.</span></div>';
     researchStrip.append($('research-question'));
     $('tab-intelligence').querySelector('.research-heading').after(researchStrip);
-    researchStrip.insertAdjacentHTML('afterend', '<nav class="overview-jumps" aria-label="Jump within overview"><button data-jump="signal-list">Signals</button><button data-jump="overview-markets">Markets</button><button data-jump="overview-news">Reporting</button></nav>');
     $('research-query').placeholder = 'What is changing, why does it matter, and what should I watch?';
     $('clear-chat').textContent = 'Reset';
     const controls = $('tab-intelligence').querySelector('.research-controls'), more = document.createElement('details');
@@ -31,11 +30,11 @@
     $('signal-list').before(priorityHeading);
     $('signal-list').insertAdjacentHTML('afterend', '<button class="btn sm" id="show-more-signals">Show more signals</button>');
     const market = document.createElement('section'); market.id = 'overview-markets'; market.className = 'overview-section';
-    market.innerHTML = '<div class="hub-section-heading"><h2>Market context</h2><span>Provider quotes · activity · related reporting</span></div><div class="overview-market-table"></div><details id="overview-radar"><summary>New & low-cost assets</summary></details>';
+    market.innerHTML = '<div class="hub-section-heading"><h2>The Mark</h2><span>Provider quotes · activity · related reporting</span></div><div class="overview-market-table"></div><details id="overview-radar"><summary>New & low-cost assets</summary></details>';
     market.querySelector('.overview-market-table').append($('tab-picks'));
     market.querySelector('details').append($('tab-radar'));
     const news = document.createElement('section'); news.id = 'overview-news'; news.className = 'overview-section';
-    news.innerHTML = '<div class="hub-section-heading"><h2>Latest reporting</h2><span>Original links, attribution, and timestamps</span></div>';
+    news.innerHTML = '<div class="hub-section-heading"><h2>Newsstand</h2><span>Original links, attribution, and timestamps</span></div>';
     news.append($('tab-news'));
     news.insertAdjacentHTML('beforeend', '<button class="btn sm" id="show-more-reporting">Show more reporting</button><details class="market-expectations"><summary>Prediction market context</summary></details>');
     news.querySelector('.market-expectations').append($('pmmacro'));
@@ -63,6 +62,7 @@
     $('overview-radar').addEventListener('toggle', () => renderRadar());
     $('overview-stream').addEventListener('toggle', () => renderStream());
     document.addEventListener('click', handleClick, true);
+    document.addEventListener('error', event => { const img = event.target; if (img.tagName === 'IMG' && img.closest('.news-card')) { img.closest('.news-card').classList.add('noimg'); img.remove(); } }, true);
     document.addEventListener('submit', handleToolSubmit);
     document.addEventListener('keydown', event => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('filter').focus(); $('filter').select(); }
@@ -75,6 +75,10 @@
     simplifyInspector(); renderStatus(); compose();
   }
   function navigate(next) {
+    if (document.body.dataset.experience !== 'workspace') {
+      document.body.dataset.experience = 'workspace'; $('start-screen').hidden = true; $('topic-workspace').hidden = true;
+      window.dispatchEvent(new Event('crawler:experience-change'));
+    }
     destination = next;
     const internal = next === 'watchlist' ? 'workspace' : next === 'operations' ? 'registry' : 'intelligence';
     $('tabs').querySelector('[data-t="' + internal + '"]').click();
@@ -82,33 +86,44 @@
     compose(); window.scrollTo({ top: 0, behavior: 'instant' });
   }
   function focusResearch() { navigate('overview'); $('research-query').focus(); $('research-strip').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  const PAGES = {
+    overview: ['THE RESEARCH DESK', 'Priority signals', 'The developments that matter, with their evidence close at hand.'],
+    markets: ['MARKETS', 'The Mark', 'Stock and crypto quotes with provider timestamps. Stale data is labeled.'],
+    reporting: ['REPORTING', 'Newsstand', 'Original links, attribution and timestamps from every collected source.'],
+    activity: ['ACTIVITY', 'All collected activity', 'Everything the crawler has collected, newest first.']
+  };
   function compose() {
     if (composing) return; composing = true;
-    const overview = destination === 'overview';
+    const page = PAGES[destination], overview = destination === 'overview', markets = destination === 'markets';
     document.body.dataset.destination = destination;
-    if (overview) {
+    document.body.dataset.inspector = inspector;
+    document.body.dataset.inspectorOpen = String(inspectorOpen || inspector !== 'signal');
+    if (page) {
       $('tab-intelligence').hidden = false;
       for (const id of ['tab-picks', 'tab-radar', 'tab-news', 'tab-feed']) $(id).hidden = false;
-      renderPicks(); renderNews(true);
-      if ($('overview-radar').open) renderRadar();
-      if ($('overview-stream').open) renderStream();
-      $('show-more-reporting').hidden = newsPosts.length <= 6;
+      const heading = $('tab-intelligence').querySelector('.research-heading');
+      heading.querySelector('.eyebrow').textContent = page[0];
+      heading.querySelector('h1').innerHTML = page[1] + '<span class="accent">.</span>';
+      heading.querySelector('p').textContent = page[2];
+      if (markets) { renderPicks(); if ($('overview-radar').open) renderRadar(); }
+      if (destination === 'reporting') renderNews(true);
+      if (destination === 'activity') { $('overview-stream').open = true; renderStream(); }
     }
-    $('research-detail').hidden = !overview || inspector !== 'signal';
-    $('detail').hidden = !overview || inspector !== 'asset';
+    $('research-detail').hidden = !overview || inspector !== 'signal' || !inspectorOpen;
+    $('detail').hidden = !(overview || markets) || inspector !== 'asset';
     $('assistant-panel').hidden = !overview || inspector !== 'chat';
     $('tab-mentions').hidden = false;
-    if (overview && inspector === 'asset') { renderDetail(); renderMentions(); }
+    if ((overview || markets) && inspector === 'asset') { renderDetail(); renderMentions(); }
     if (destination === 'operations') renderOperations();
-    if (destination === 'watchlist') renderServerWorkspace();
+    if (destination === 'watchlist') { renderServerWorkspace(); window.CrawlerNetwork?.renderPanels(); }
     simplifyInspector(); renderServerDossier(); renderStatus();
-    $('show-more-signals').hidden = $('signal-list').children.length < window.CrawlerSignalLimit;
+    $('show-more-signals').hidden = $('signal-list').querySelectorAll('.signal-card').length < window.CrawlerSignalLimit;
     composing = false;
   }
   function simplifyInspector() {
     const root = $('research-detail');
     if (!root.querySelector('.dossier-head') || root.querySelector('.inspector-actions')) return;
-    const actions = document.createElement('div'); actions.className = 'inspector-actions'; actions.innerHTML = '<button class="btn sm" id="ask-about-signal">Ask about this</button><button class="btn sm" id="investigate-signal">Investigate gaps</button><button class="btn sm" id="review-signal">Review a claim</button>';
+    const actions = document.createElement('div'); actions.className = 'inspector-actions'; actions.innerHTML = '<button class="btn sm" id="close-signal">Close details</button><button class="btn sm" id="ask-about-signal">Ask about this</button><button class="btn sm" id="investigate-signal">Investigate gaps</button><button class="btn sm" id="review-signal">Review a claim</button>';
     root.querySelector('.dossier-head').append(actions);
     const sections = root.querySelector('.dossier-sections');
     const brief = sections.querySelector('section');
@@ -174,7 +189,7 @@
     }
     const h = api.health, jobs = api.operations?.jobs || [], sources = api.sources;
     target.innerHTML = `<div class="system-metrics"><div><span>Collection</span><b>${h.workers} service threads</b></div><div><span>Evidence store</span><b>${esc(h.storage)}</b></div><div><span>Research AI</span><b>${h.ai.configured ? esc(h.ai.model) : 'Not configured'}</b></div><div><span>Job queue</span><b>${h.queued} queued · ${h.deadLetters} failed</b></div></div>
-      <section class="research-box"><div class="hub-section-heading"><h2>Server sources</h2><button class="btn sm" id="configure-connector">Add connector</button></div><div class="source-list">${sources.map(s => `<article><div><b>${esc(s.name)}</b><p class="dim sm">${esc(s.kind)} · ${esc(s.language || 'unknown')} · ${esc(s.family || s.name)}${s.geographyVerified ? ' · publisher geography reviewed' : ''}</p><small class="${s.health?.ok ? 'up' : 'dim'}">${s.enabled ? s.health ? s.health.ok ? 'Healthy · ' + date(s.health.checkedAt) : esc(s.health.error) : 'Awaiting first poll' : 'Paused'}</small></div><div class="source-actions"><button class="btn sm" data-edit-connector="${esc(s.id)}">Edit</button><button class="btn sm" data-server-toggle-source="${esc(s.id)}">${s.enabled ? 'Pause' : 'Enable'}</button>${s.enabled ? `<button class="btn sm" data-poll-source="${esc(s.id)}">Poll now</button>` : ''}</div></article>`).join('')}</div></section>
+      <section class="research-box"><div class="hub-section-heading"><h2>Server sources</h2><button class="btn sm" data-open-source-directory>Browse all sources</button><button class="btn sm" id="configure-connector">Add connector</button></div><div class="source-list">${sources.slice(0, 8).map(s => `<article><div><b>${esc(s.name)}</b><p class="dim sm">${esc(s.kind)} · ${esc(s.language || 'unknown')} · ${esc(s.family || s.name)}${s.geographyVerified ? ' · publisher geography reviewed' : ''}</p><small class="${s.health?.ok ? 'up' : 'dim'}">${s.enabled ? s.health ? s.health.ok ? 'Healthy · ' + date(s.health.checkedAt) : esc(s.health.error) : 'Awaiting first poll' : 'Paused'}</small></div><div class="source-actions"><button class="btn sm" data-edit-connector="${esc(s.id)}">Edit</button><button class="btn sm" data-server-toggle-source="${esc(s.id)}">${s.enabled ? 'Pause' : 'Enable'}</button>${s.enabled ? `<button class="btn sm" data-poll-source="${esc(s.id)}">Poll now</button>` : ''}</div></article>`).join('')}</div></section>
       <div class="tool-grid"><button class="research-box tool-card" id="import-document"><b>Import evidence</b><span>Text, permitted documents, PDF, or media provenance.</span></button><button class="research-box tool-card" id="historical-replay"><b>Historical replay</b><span>Inspect the records and reviews available at a past time.</span></button><button class="research-box tool-card" id="show-measurements"><b>Quantitative signals</b><span>Namespaced assets, stale-data checks, and anomalies.</span></button><button class="research-box tool-card" id="show-audit"><b>Audit & integrity</b><span>${api.operations?.auditIntegrity.valid ? 'Hash chain verified' : 'Integrity check requires attention'} · ${api.operations?.auditIntegrity.entries || 0} entries.</span></button></div>
       <details class="research-box"><summary>Worker queue & recovery</summary>${jobs.slice(0, 30).map(j => `<div class="queue-row"><span><b>${esc(j.kind)}</b> · ${esc(j.state)} · attempt ${j.attempts}<small>${esc(j.last_error || '')}</small></span>${j.state === 'dead' ? `<button class="btn sm" data-retry-job="${esc(j.id)}">Retry</button>` : ''}</div>`).join('') || '<p class="dim sm">No jobs yet.</p>'}</details>
       <details class="research-box"><summary>Connected services & permissions</summary><p class="dim sm">Raw storage: ${esc(h.objects)}. Automatic AI enrichment: ${h.ai.automaticAnalysis ? 'enabled' : 'disabled'}. Source text remains untrusted. High-consequence claims need additional review. Server access uses a same-origin session; remote hosting requires an owner token and HTTPS.</p><p class="dim sm">A provider must be configured and licensed for its intended use. Generic JSON connectors can supply institutional, options, exchange, or chain data using server-held environment credentials. Tickernames alone are not used as asset identities.</p></details>`;
@@ -189,7 +204,7 @@
   }
   function connectorForm(source = {}) {
     const checked = key => source[key] ? ' checked' : '';
-    return `<form id="connector-tool-form" class="stack-form"><input type="hidden" name="id" value="${esc(source.id || '')}"><div class="form-columns"><label>Source name<input name="name" value="${esc(source.name || '')}" required></label><label>Connector<select name="kind">${['rss', 'json', 'coingecko', 'fred', 'sec', 'fred_vintages', 'coingecko_asset'].map(k => `<option${source.kind === k ? ' selected' : ''}>${k}</option>`).join('')}</select></label></div><label>HTTPS endpoint<input name="url" type="url" value="${esc(source.url || '')}" required></label><div class="form-columns"><label>Publisher family<input name="family" value="${esc(source.family || '')}"></label><label>Language<input name="language" value="${esc(source.language || 'unknown')}"></label><label>Region<input name="region" value="${esc(source.region || '')}"></label></div><div class="form-columns"><label>Source tier<select name="tier">${['regional', 'primary', 'wire', 'major', 'specialist', 'social'].map(v => `<option${source.tier === v ? ' selected' : ''}>${v}</option>`).join('')}</select></label><label>Poll interval, seconds<input name="seconds" type="number" min="60" value="${(source.interval || 300000) / 1000}" required></label></div><label>Permitted collection & reuse<textarea name="permissions" required>${esc(source.permissions || '')}</textarea></label><label>Connector mapping / configuration JSON<textarea name="config" rows="5">${esc(JSON.stringify(source.config || {}, null, 2))}</textarea></label><p class="dim sm">JSON mappings: {"itemsPath":"data", "recordType":"observation", "assetClass":"equity", "metric":"price_usd", "fields":{"assetId":"asset_id", "value":"price", "observedAt":"timestamp"}}. Use namespaced IDs such as equity:NASDAQ:NVDA or crypto:ethereum:0x… .</p><div class="form-columns"><label>Credential environment variable<input name="credentialEnv" value="${esc(source.credentialEnv || '')}" placeholder="PROVIDER_API_KEY"></label><label>Credential header<input name="credentialHeader" value="${esc(source.credentialHeader || 'Authorization')}"></label><label>Header prefix<input name="credentialPrefix" value="${esc(source.credentialPrefix ?? 'Bearer ')}"></label></div><label class="chk"><input type="checkbox" name="geographyVerified"${checked('geographyVerified')}> Publisher geography reviewed</label><label class="chk"><input type="checkbox" name="allowFullText"${checked('allowFullText')}> Allow permitted full-document retrieval</label><label class="chk"><input type="checkbox" name="enabled"${checked('enabled')}> Enable server collection</label><button class="btn primary">Save connector</button><p class="form-feedback" role="status"></p></form>`;
+    return `<form id="connector-tool-form" class="stack-form"><input type="hidden" name="id" value="${esc(source.id || '')}"><div class="form-columns"><label>Source name<input name="name" value="${esc(source.name || '')}" required></label><label>Connector<select name="kind">${['rss', 'json', 'coingecko', 'fred', 'sec', 'fred_vintages', 'coingecko_asset', 'equity_daily'].map(k => `<option${source.kind === k ? ' selected' : ''}>${k}</option>`).join('')}</select></label></div><label>HTTPS endpoint<input name="url" type="url" value="${esc(source.url || '')}" required></label><div class="form-columns"><label>Publisher family<input name="family" value="${esc(source.family || '')}"></label><label>Language<input name="language" value="${esc(source.language || 'unknown')}"></label><label>Region<input name="region" value="${esc(source.region || '')}"></label></div><div class="form-columns"><label>Source tier<select name="tier">${['regional', 'primary', 'wire', 'major', 'specialist', 'social'].map(v => `<option${source.tier === v ? ' selected' : ''}>${v}</option>`).join('')}</select></label><label>Poll interval, seconds<input name="seconds" type="number" min="60" value="${(source.interval || 300000) / 1000}" required></label></div><label>Permitted collection & reuse<textarea name="permissions" required>${esc(source.permissions || '')}</textarea></label><label>Connector mapping / configuration JSON<textarea name="config" rows="5">${esc(JSON.stringify(source.config || {}, null, 2))}</textarea></label><p class="dim sm">JSON mappings: {"itemsPath":"data", "recordType":"observation", "assetClass":"equity", "metric":"price_usd", "fields":{"assetId":"asset_id", "value":"price", "observedAt":"timestamp"}}. Use namespaced IDs such as equity:NASDAQ:NVDA or crypto:ethereum:0x… .</p><div class="form-columns"><label>Credential environment variable<input name="credentialEnv" value="${esc(source.credentialEnv || '')}" placeholder="PROVIDER_API_KEY"></label><label>Credential header<input name="credentialHeader" value="${esc(source.credentialHeader || 'Authorization')}"></label><label>Header prefix<input name="credentialPrefix" value="${esc(source.credentialPrefix ?? 'Bearer ')}"></label></div><label class="chk"><input type="checkbox" name="geographyVerified"${checked('geographyVerified')}> Publisher geography reviewed</label><label class="chk"><input type="checkbox" name="allowFullText"${checked('allowFullText')}> Allow permitted full-document retrieval</label><label class="chk"><input type="checkbox" name="enabled"${checked('enabled')}> Enable server collection</label><button class="btn primary">Save connector</button><p class="form-feedback" role="status"></p></form>`;
   }
   function reviewServerClaim(id) {
     const d = api.cachedDossier(window.IntelligenceUI.selectedSignal()), claim = d?.claims.find(c => c.id === id); if (!claim) return;
@@ -198,15 +213,16 @@
   async function handleClick(event) {
     const b = event.target.closest('button');
     if (event.target.closest('[data-s]') && !event.target.closest('a')) inspector = 'asset';
-    if (b?.dataset.signal) inspector = 'signal';
+    if (b?.dataset.signal) { inspector = 'signal'; inspectorOpen = true; }
     if (!b) return;
     try {
       if (b.dataset.destination) navigate(b.dataset.destination);
-      if (b.dataset.jump) { navigate('overview'); $(b.dataset.jump).scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      if (b.dataset.jump) navigate({ 'overview-markets': 'markets', 'overview-news': 'reporting' }[b.dataset.jump] || 'overview');
       if (b.id === 'focus-research') focusResearch();
       if (b.id === 'show-more-signals') { window.CrawlerSignalLimit += 12; window.IntelligenceUI.render('intelligence', true); }
       if (b.id === 'show-more-reporting') { const expanded = $('overview-news').classList.toggle('reporting-expanded'); b.textContent = expanded ? 'Show fewer reports' : 'Show more reporting'; }
       if (b.id === 'close-assistant') { inspector = 'signal'; compose(); }
+      if (b.id === 'close-signal') { inspectorOpen = false; compose(); }
       if (b.id === 'close-tools') $('research-tools').close();
       if (b.id === 'retry-server') await api.probe();
       if (b.id === 'ask-about-signal') { const s = window.IntelligenceUI.selectedSignal(); if (s) { $('research-query').value = 'What evidence and uncertainty should I watch for ' + s.title + '?'; focusResearch(); } }
@@ -252,14 +268,16 @@
     } catch (error) { if (feedback) { feedback.textContent = error.message; feedback.classList.add('error'); } }
     finally { if (submit?.isConnected) submit.disabled = false; }
   }
-  window.CrawlerHub = { navigate, compose, navigateToModule(name) {
+  window.CrawlerHub = { navigate, compose, editSource(source) { showTool('Edit connector', connectorForm(source)); }, navigateToModule(name) {
     if (name === 'sources' || name === 'registry') return navigate('operations');
     if (name === 'workspace') return navigate('watchlist');
+    if (name === 'news') return navigate('reporting');
+    if (name === 'picks') return navigate('markets');
+    if (name === 'mentions') { navigate('markets'); inspector = 'asset'; $('asset-mentions').open = true; renderMentions(); compose(); $('asset-mentions').scrollIntoView({ behavior: 'smooth' }); return; }
     navigate('overview');
-    if (name === 'mentions') { inspector = 'asset'; $('asset-mentions').open = true; renderMentions(); compose(); $('asset-mentions').scrollIntoView({ behavior: 'smooth' }); }
-    if (name === 'news') $('overview-news').scrollIntoView({ behavior: 'smooth' });
-    if (name === 'picks') $('overview-markets').scrollIntoView({ behavior: 'smooth' });
   } };
   window.IntelligenceUI.render = (...args) => { originalRender(...args); if ($('assistant-panel')) compose(); };
   mount();
 })();
+
+

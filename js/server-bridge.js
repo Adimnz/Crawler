@@ -5,9 +5,9 @@
   let connected = false, session = null, health = null, cursor = { at: 0, id: '' }, pulling = false;
   let serverSources = [], workspace = null, operations = null, metrics = [], lastFailure = '', syncTimer, hydrated = false;
   const dossiers = new Map(), pendingDossiers = new Set();
-  let probing = null, refreshing = null, everConnected = false, shuttingDown = false;
+  let probing = null, refreshing = null, everConnected = false, shuttingDown = false, probeFailures = 0;
   let nextProbeAt = 0, retryDelay = 15000, lastUpdate = {};
-  const inWorkspace = () => !document.body.dataset.experience || document.body.dataset.experience === 'workspace';
+  const inWorkspace = () => true; // Collection outlives navigation; only rendering is view-specific.
   const emit = () => window.dispatchEvent(new CustomEvent('crawler:server-state'));
   function lifecycleUI() {
     if (!document.body) return;
@@ -24,10 +24,10 @@
     }
     banner.hidden = connected || !everConnected;
     if (!banner.hidden) {
-      banner.querySelector('strong').textContent = shuttingDown ? 'Research server is shutting down' : 'Research server is offline';
+      banner.querySelector('strong').textContent = shuttingDown ? 'Research server is shutting down' : 'Research server connection interrupted';
       banner.querySelector('span').textContent = shuttingDown
         ? 'Research collection is stopping. Saved boards remain on disk. This browser tab cannot be forcibly closed by a local server.'
-        : 'Background research and live updates are unavailable. Start the Python server again, then reconnect.';
+        : 'Reconnecting automatically. Saved sources remain available; server research may still be running.';
     }
     for (const button of document.querySelectorAll('[data-stop-crawler-server]')) {
       button.hidden = !connected || !session?.ownerAuthorized;
@@ -51,7 +51,8 @@
       if (!response.ok) throw new Error(result.error || 'Research service request failed.');
       return result;
     } catch (error) {
-      if (error instanceof TypeError || error.name === 'AbortError') disconnected();
+      // A slow research request is not evidence that the server has stopped.
+      if ((error instanceof TypeError || error.name === 'AbortError') && path !== 'ready') probe();
       throw error;
     } finally { clearTimeout(timer); }
   }
@@ -66,14 +67,14 @@
     try {
       const result = await request('ready', undefined, 5000);
       if (result.service !== 'trend-crawler' || !result.ready) throw new Error('Research server not ready');
-      health = result;
+      health = result; probeFailures = 0;
       if (!wasConnected) session = await request('session', undefined, 5000);
       connected = !!session?.authorized;
       if (connected) { everConnected = true; shuttingDown = false; retryDelay = 15000; nextProbeAt = 0; }
       lastFailure = '';
     } catch {
-      disconnected();
-      lastFailure = 'The research API is unavailable at this address. Open the URL printed by the Python server.';
+      if (++probeFailures >= 3) disconnected();
+      if (probeFailures >= 3) lastFailure = 'The research API is not responding. Reconnecting automatically; retained sources remain available.';
     }
     lifecycleUI(); if (connected !== wasConnected) emit();
     if (connected && !wasConnected && inWorkspace()) { refresh(true).catch(() => {}); pull().catch(() => {}); }
@@ -112,16 +113,18 @@
     if (!connected || pulling) return;
     pulling = true;
     try {
-      for (let page = 0; page < 10; page++) {
-        const result = await request('documents?after=' + cursor.at + '&afterId=' + encodeURIComponent(cursor.id));
+      for (let page = 0; page < 2; page++) {
+        const result = await request('documents?limit=100&after=' + cursor.at + '&afterId=' + encodeURIComponent(cursor.id));
+        let processed = 0;
         for (const doc of result.documents) {
           const syms = (doc.entities || []).flatMap(entity => entity.id.startsWith('equity:') || entity.id.startsWith('unresolved:ticker:') ? [entity.id.split(':').pop()] : entity.id === 'crypto:coingecko:bitcoin' ? ['BTC'] : entity.id === 'crypto:coingecko:ethereum' ? ['ETH'] : []);
-          const post = { id: 'server-' + doc.id, src: 'News', outlet: true, listed: true, title: doc.title, text: doc.text, url: doc.url, sub: doc.source, tier: doc.tier, language: doc.language, ts: doc.publishedAt, publishedEstimated: doc.publishedEstimated, eventAt: doc.eventAt, syms, categories: doc.categories,
+          const post = { id: 'server-' + doc.id, src: 'News', outlet: true, listed: true, title: doc.title, image: doc.image, text: doc.text, url: doc.url, sub: doc.source, tier: doc.tier, language: doc.language, ts: doc.publishedAt, publishedEstimated: doc.publishedEstimated, eventAt: doc.eventAt, syms, categories: doc.categories,
             serverId: doc.id, serverEventId: doc.eventId, translation: doc.translation,
             raw: { title: doc.title, text: doc.text, source: doc.source, url: doc.url, sourceVersion: doc.version, sourceRetrievedAt: doc.retrievedAt, objectKey: doc.objectKey } };
           addPost(post);
           // The active post store may have already seen this text while derived analysis changed.
           engine.ingest(post, { text: post.text, url: post.url, source: post.sub, publishedAt: post.ts, ...post.raw });
+          if (++processed % 20 === 0) await new Promise(resolve => setTimeout(resolve, 0));
         }
         cursor = result.cursor;
         if (!result.hasMore) break;
@@ -211,3 +214,4 @@
   }, 15000);
   setInterval(() => { if (connected && !document.hidden && inWorkspace()) refresh().catch(() => {}); }, 60000);
 })();
+

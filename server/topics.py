@@ -91,6 +91,7 @@ class TopicResearch:
     def _update(self, topic_id, **changes):
         with self.s.lock:
             item = self._read(topic_id)
+            if item.get("deleted"): return item
             item.update(changes, updatedAt=now_ms())
             self.db.put("topicPortfolio", topic_id, item)
         return item
@@ -102,7 +103,7 @@ class TopicResearch:
         return item
 
     def list(self):
-        return self.db.latest("topicPortfolio", 200)
+        return [t for t in self.db.latest("topicPortfolio", 200) if not t.get("embedded") and not t.get("deleted")]
 
     def create(self, query):
         values = query if isinstance(query, dict) else {"query": query}
@@ -113,7 +114,7 @@ class TopicResearch:
         topic_id = "topic-" + a.digest(_normal(text))[:28]
         with self.s.lock:
             existing = self.db.get("topicPortfolio", topic_id)
-            if existing: return self.refresh(topic_id, manual=True)
+            if existing and not existing.get("deleted"): return self.refresh(topic_id, manual=True)
             at = now_ms()
             item = {"id": topic_id, "query": text, "title": text[:140], "state": "Queued", "status": "Queued",
                     "progress": "Waiting for the research worker", "enabled": True, "refreshMinutes": interval,
@@ -122,7 +123,7 @@ class TopicResearch:
                     "qualifiedCount": 0, "candidateCount": 0, "questions": [], "whatChanged": [], "watchSubjects": [], "marketResearch": None,
                     "manualAiRequest": {"token": identifier("manual-research"), "requestedAt": at},
                     "limitations": ["Research is queued. Assets appear only when collected source records support a topic match."],
-                    "purpose": _PURPOSE}
+                    "purpose": _PURPOSE, "embedded": values.get("embedded") is True}
             self.db.put("topicPortfolio", topic_id, item)
             item["jobId"] = self.db.enqueue("topic-research", {"topicId": topic_id}, "topic-initial:" + topic_id)
             self.db.put("topicPortfolio", topic_id, item)
@@ -136,6 +137,32 @@ class TopicResearch:
         if not math.isfinite(interval) or not 5 <= interval <= 1440:
             raise ValueError("Refresh interval must be between 5 and 1440 minutes")
         return int(interval)
+
+    def stop(self, topic_id, owner="local-owner"):
+        """Stop personal branch work; preserve shared research for other subscribers."""
+        with self.s.lock:
+            item = self._read(topic_id)
+            for board in self.s.network_research.list_boards(owner):
+                if board["topicId"] == topic_id:
+                    self.s.network_research.board_action(owner, {"id": board["id"], "action": "cancel"})
+            others = [r for r in self.db.latest("accountTopic", 10000) if r["topicId"] == topic_id and r["ownerId"] != owner and r.get("enabled", True)]
+            if not others: item = self.configure(topic_id, {"enabled": False})
+            return {**item, "enabled": False}
+
+    def delete(self, topic_id, owner="local-owner"):
+        with self.s.lock:
+            self.stop(topic_id, owner)
+            for board in self.s.network_research.list_boards(owner):
+                if board["topicId"] == topic_id: self.s.network_research.delete_board(owner, board["id"])
+            for row in self.db.latest("accountTopic", 10000):
+                if row["topicId"] == topic_id and row["ownerId"] == owner: self.db.delete("accountTopic", row["id"])
+            shared = any(r["topicId"] == topic_id for r in self.db.latest("accountTopic", 10000)) or any(b["topicId"] == topic_id for b in self.db.latest("researchBoard", 10000))
+            if not shared:
+                # A tombstone prevents an in-flight worker from resurrecting a deleted topic.
+                self.db.put("topicPortfolio", topic_id, {"id": topic_id, "deleted": True, "enabled": False, "state": "Deleted", "status": "Deleted", "manualAiRequest": None})
+                self.db.delete("networkGraph", topic_id)
+            self.db.audit("Topic removed from workspace", topic_id, {"ownerId": owner})
+            return {"deleted": True, "id": topic_id}
 
     def configure(self, topic_id, values):
         item = self._read(topic_id)
@@ -156,6 +183,7 @@ class TopicResearch:
     def refresh(self, topic_id, manual=True):
         with self.s.lock:
             item = self._read(topic_id)
+            if item.get("deleted"): raise ValueError("Topic was deleted; start a new search")
             if not item.get("enabled", True) and not (manual or item.get("manualAiRequest")): return item
             pending = self.db.get_job(item.get("jobId", ""))
             request = item.get("manualAiRequest")
@@ -303,6 +331,9 @@ class TopicResearch:
         try:
             result = self.s.ai.discover_topic(item["query"], item.get("plan", {}).get("searchTerms", []))
             candidates = result.get("sources", []) if isinstance(result, dict) else result
+            feed_leads = [lead for lead in self.db.latest("feedLead", 500)
+                          if lead.get("contentRole") == "discovery" and self._match({**lead, "text": lead.get("summary", "")}, item)["matches"]][:3]
+            candidates = feed_leads + (candidates if isinstance(candidates, list) else [])
             seen = set()
             for candidate in (candidates if isinstance(candidates, list) else [])[:12]:
                 if not isinstance(candidate, dict): continue
@@ -553,6 +584,7 @@ class TopicResearch:
     def _complete(self, topic_id, checked_changes, remaining_changes, used_request_token=None, **changes):
         with self.s.lock:
             current = self._read(topic_id)
+            if current.get("deleted") or not current.get("enabled", True) and not current.get("manualAiRequest"): return current
             pending = dict(current.get("pendingEvidenceChanges", {}))
             for key, event in checked_changes.items():
                 # A newer event arriving during finalization must remain due.
@@ -596,6 +628,8 @@ class TopicResearch:
             self._update(topic_id, progress="Explaining the topic and identifying companies, markets, and institutions to watch")
             research_changes = self._market_report(item, matched, use_ai, manual=bool(request_token))
             item = {**item, **research_changes}
+            current = self._read(topic_id)
+            if current.get("deleted") or not current.get("enabled", True) and not current.get("manualAiRequest"): return current
             cycle_started = now_ms()
             self.s.investments.cycle("Topic research: " + item["query"][:160])
             # Filings may have been collected concurrently while provider work was queued.
@@ -671,11 +705,15 @@ class TopicResearch:
                 lastRunAt=at, nextRefreshAt=next_refresh,
                 sourceFingerprint=fingerprint, version=version,
                 whatChanged=changed or ["No material change found within the checked source set."], error=None)
+            if result.get("deleted") or not result.get("enabled", True) and not result.get("manualAiRequest"): return result
             if material:
                 self.db.put("topicRevision", topic_id + ":v" + str(version), result)
                 self.db.audit("Topic watch portfolio revised", topic_id, {"version": version, "qualified": len(entries), "candidates": len(candidates)})
             self.s.network_research.topic_completed(result, use_ai=use_ai and not result.get("marketResearchStale"))
             return result
         except Exception:
+            current = self._read(topic_id)
+            if current.get("deleted") or not current.get("enabled", True) and not current.get("manualAiRequest"): return current
             self._update(topic_id, state="Failed", status="Failed", progress="Research will retry automatically", error="Topic research could not complete; retained evidence remains available.")
             raise
+

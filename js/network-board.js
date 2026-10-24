@@ -5,7 +5,7 @@
   const e = value => esc(String(value ?? ''));
   const types = ['observation','question','company','person','journalist','product','financial_institution','financial_record','contract','agency','supplier','material','region','competitor','instrument','market','topic'];
   const relationships = ['user_defined','research_question','authored_by','published_by','reports_on','manufactured_by','owned_by','subsidiary_of','partnered_with','invested_in','financed_by','contract_awarded_to','supplied_by','competes_with','produces','common_ownership','references'];
-  const focuses = {overview:'Research this entity',ownership:'Investigate ownership',finances:'Investigate finances',contracts:'Find disclosed contracts',suppliers:'Explore documented suppliers',competitors:'Explore competitors',markets:'Find related public instruments',contradictions:'Find contradictory evidence',verify:'Verify selected connection'};
+  const focuses = {costs:'Investigate costs and changes',questions:'Resolve unanswered questions',overview:'Research this entity',ownership:'Investigate ownership',finances:'Investigate finances',contracts:'Find disclosed contracts',suppliers:'Explore documented suppliers',competitors:'Explore competitors',markets:'Find related public instruments',contradictions:'Find contradictory evidence',verify:'Verify selected connection'};
   const label = value => String(value || '').replaceAll('_',' ');
   const uid = () => 'manual-' + crypto.randomUUID();
   const clone = value => JSON.parse(JSON.stringify(value));
@@ -20,7 +20,43 @@
   function checkpoint() { undo.push(clone(b()));if(undo.length>60)undo.shift();redo=[]; }
   function changed() { dirty=true;document.getElementById('network-save-state')?.replaceChildren(document.createTextNode('Unsaved changes')); }
   function position(id) { return b()?.layout[id] || {x:0,y:0}; }
+  function placeNearParents() {
+    const layout=b().layout,known=new Set(Object.keys(layout));if(!known.size)return;
+    const free=(x,y)=>!Object.values(layout).some(p=>Math.abs(p.x-x)<nodeWidth+24&&Math.abs(p.y-y)<nodeHeight+24);
+    const children=new Map();
+    for(const edge of allEdges())for(const [p,c] of [[edge.from,edge.to],[edge.to,edge.from]])if(known.has(p)&&!known.has(c)){if(!children.has(p))children.set(p,new Set());children.get(p).add(c);}
+    for(const [parent,set] of children){
+      const ids=[...set].filter(id=>!layout[id]),base=layout[parent];
+      ids.forEach((id,i)=>{
+        const angle=2*Math.PI*i/ids.length-Math.PI/2;let radius=nodeWidth+150,spot={x:base.x+Math.cos(angle)*radius,y:base.y+Math.sin(angle)*radius};
+        for(let tries=0;tries<12&&!free(spot.x,spot.y);tries++){radius+=70;spot={x:base.x+Math.cos(angle)*radius,y:base.y+Math.sin(angle)*radius};}
+        layout[id]=spot;
+      });
+    }
+  }
+  function cleanUp() {
+    const nodes=visibleNodes(),ids=new Set(nodes.map(n=>n.id)),root=detail.graph.rootId,pinned=new Set(b().pinned),adjacency=new Map();
+    for(const edge of allEdges())if(ids.has(edge.from)&&ids.has(edge.to))for(const [x,y] of [[edge.from,edge.to],[edge.to,edge.from]]){if(!adjacency.has(x))adjacency.set(x,[]);adjacency.get(x).push(y);}
+    const depth=new Map([[root,0]]),parent=new Map(),queue=[root];
+    for(let i=0;i<queue.length;i++)for(const next of adjacency.get(queue[i])||[])if(!depth.has(next)){depth.set(next,depth.get(queue[i])+1);parent.set(next,queue[i]);queue.push(next);}
+    const deepest=Math.max(...depth.values());
+    for(const n of nodes)if(!depth.has(n.id))depth.set(n.id,deepest+1);
+    const levels=[];for(const n of nodes)(levels[depth.get(n.id)]||(levels[depth.get(n.id)]=[])).push(n);
+    const next={},rowOf={},perColumn=10,stepX=nodeWidth+120,stepY=nodeHeight+40;let column=0;
+    levels.forEach(level=>{
+      if(!level)return;
+      level.sort((p,q)=>(rowOf[parent.get(p.id)]??0)-(rowOf[parent.get(q.id)]??0)||p.type.localeCompare(q.type)||p.label.localeCompare(q.label));
+      for(let start=0;start<level.length;start+=perColumn,column++){
+        const chunk=level.slice(start,start+perColumn);
+        chunk.forEach((n,i)=>{const y=(i-(chunk.length-1)/2)*stepY;rowOf[n.id]=y;next[n.id]={x:column*stepX,y};});
+      }
+    });
+    checkpoint();
+    for(const id of ids)b().layout[id]=pinned.has(id)&&b().layout[id]?b().layout[id]:next[id];
+    changed();paintWorld();fit();
+  }
   function initialLayout() {
+    placeNearParents();
     const columns={topic:0,article:-420,publisher:-780,event:-1120,company:410,financial_institution:410,market:410,product:770,person:770,journalist:-780,financial_record:1130,contract:1130,agency:1490,supplier:1490,competitor:1490,material:1850,region:1850,question:770,instrument:1130,observation:410};
     const buckets=new Map();
     for(const n of allNodes()){
@@ -81,15 +117,17 @@
     initialLayout();const nodes=visibleNodes(),ids=new Set(nodes.map(n=>n.id));
     const edges=allEdges().filter(edge=>ids.has(edge.from)&&ids.has(edge.to)&&(!relationshipFilter||edge.type===relationshipFilter));
     const world=document.getElementById('network-world');if(!world)return;
+    const linked = new Set(selected ? [selected] : []);
+    for (const edge of edges) if (edge.from===selected || edge.to===selected) { linked.add(edge.from); linked.add(edge.to); }
     world.innerHTML=`<svg class="network-lines" aria-label="Research relationships"><defs><marker id="network-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>${edges.map(edge=>{
       const from=position(edge.from),to=position(edge.to),status=edge.origin==='manual'?'manual':edge.status==='Verified'?'verified':edge.status==='Corroborated'?'corroborated':edge.status==='Research question'?'question':/disput|review/i.test(edge.status)?'disputed':'reported';
-      return `<g class="network-edge ${status}${selectedEdge===edge.id?' selected':''}" data-network-edge="${e(edge.id)}" role="button" tabindex="0" aria-label="${e(label(edge.type)+': '+edge.claim)}"><path class="network-line-hit" d="${linePath(edge)}"/><path class="network-line" d="${linePath(edge)}" marker-end="url(#network-arrow)"/><text x="${(from.x+to.x)/2+nodeWidth/2}" y="${(from.y+to.y)/2+nodeHeight/2-9}">${e(label(edge.type))}</text></g>`;
-    }).join('')}<path id="network-connecting-line" class="network-connecting-line"/></svg><div class="network-node-layer">${nodes.map(n=>`<article class="network-node ${n.origin==='manual'?'manual':''} ${selection.has(n.id)?'selected':''} ${b().pinned.includes(n.id)?'pinned':''}" data-network-node="${e(n.id)}" data-kind="${e(n.type)}" style="left:${position(n.id).x}px;top:${position(n.id).y}px" role="button" tabindex="0" aria-label="${e(n.label+', '+label(n.type)+', '+n.status)}"><span class="network-node-type">${e(label(n.type))}${b().pinned.includes(n.id)?' · pinned':''}</span><b>${e(n.label)}</b><small>${e(n.origin==='manual'?'Your observation':n.status)}</small><button class="network-handle" data-connect-from="${e(n.id)}" aria-label="Drag a connection from ${e(n.label)}" title="Drag to another node or empty canvas">+</button></article>`).join('')}</div>`;
+      return `<g class="network-edge ${status}${selected ? (edge.from===selected || edge.to===selected ? ' connected-chain' : ' unfocused') : ''}${selectedEdge===edge.id?' selected':''}" data-network-edge="${e(edge.id)}" role="button" tabindex="0" aria-label="${e(label(edge.type)+': '+edge.claim)}"><path class="network-line-hit" d="${linePath(edge)}"/><path class="network-line" d="${linePath(edge)}" marker-end="url(#network-arrow)"/><text x="${(from.x+to.x)/2+nodeWidth/2}" y="${(from.y+to.y)/2+nodeHeight/2-9}">${e(label(edge.type))}</text></g>`;
+    }).join('')}<path id="network-connecting-line" class="network-connecting-line"/></svg><div class="network-node-layer">${nodes.map(n=>`<article class="network-node ${selected && !linked.has(n.id)?'unfocused':''} ${n.origin==='manual'?'manual':''} ${selection.has(n.id)?'selected':''} ${b().pinned.includes(n.id)?'pinned':''}" data-network-node="${e(n.id)}" data-kind="${e(n.type)}" style="left:${position(n.id).x}px;top:${position(n.id).y}px" role="button" tabindex="0" aria-label="${e(n.label+', '+label(n.type)+', '+n.status)}"><span class="network-node-type">${e(label(n.type))}${b().pinned.includes(n.id)?' · pinned':''}</span><b>${e(n.label)}</b><small>${e(n.origin==='manual'?'Your observation':n.status)}</small><button class="network-handle" data-connect-from="${e(n.id)}" aria-label="Drag a connection from ${e(n.label)}" title="Drag to another node or empty canvas">+</button></article>`).join('')}</div>`;
     const counter=document.getElementById('network-counter');if(counter)counter.textContent=`${nodes.length} nodes · ${edges.length} connections`;
     transform();
   }
   function sourceList(evidence) {
-    return (evidence||[]).map(ref=>`<div class="network-source"><a href="${e(safeURL(ref.url))}" target="_blank" rel="noopener noreferrer">${e(ref.title||'Original source')} ↗</a><small>Version ${e(ref.version)}${ref.publishedAt?' · Published '+new Date(ref.publishedAt).toLocaleDateString():''}${ref.retrievedAt?' · Retrieved '+new Date(ref.retrievedAt).toLocaleDateString():''}</small><blockquote>${e(ref.quote)}</blockquote></div>`).join('');
+    return (evidence||[]).map(ref=>`<div class="network-source"><a href="${e(safeURL(ref.url))}" target="_blank" rel="noopener noreferrer">${e(ref.title||'Original source')} ↗</a><small>Version ${e(ref.version)}${ref.publishedAt?(ref.publishedEstimated?' · Collected ':' · Published ')+new Date(ref.publishedAt).toLocaleDateString():''}${ref.retrievedAt?' · Retrieved '+new Date(ref.retrievedAt).toLocaleDateString():''}</small><blockquote>${e(ref.quote)}</blockquote></div>`).join('');
   }
   function researchControls(id, edgeId='') {
     return `<form id="network-research-form" data-node="${e(id)}" data-edge="${e(edgeId)}"><label>Research further<select name="focus">${Object.entries(focuses).map(([key,title])=>`<option value="${key}"${edgeId&&key==='verify'?' selected':''}>${title}</option>`).join('')}</select></label><div class="network-research-options"><label>Depth<select name="depth"><option>1</option><option>2</option><option>3</option></select></label><label class="network-check"><input type="checkbox" name="automatic">Expand direct documented branches automatically</label></div><button class="network-primary" type="submit">Research further ↗</button><small>Uses the connected OpenAI model. Background expansion follows your AI settings.</small></form>`;
@@ -122,7 +160,7 @@
   }
   function render() {
     const host=document.getElementById('research-network');if(!host||!detail)return;
-    host.innerHTML=`<div class="network-heading"><div><span class="network-kicker">RESEARCH OBSERVATION BOARD</span><h2>${e(b().title)}</h2></div><span id="network-save-state">${dirty?'Unsaved changes':'Saved privately'}${b().version?' · v'+b().version:''}</span></div><div class="network-toolbar" role="toolbar" aria-label="Observation board actions"><button id="network-save" data-network-action="save" class="network-primary">Save board</button><button data-network-action="research">Research further</button><button data-network-action="add">+ Add node</button><button data-network-action="arrange">Auto-arrange</button><button data-network-action="group">Group selected</button><button data-network-action="undo"${undo.length?'':' disabled'} aria-label="Undo board edit">↶</button><button data-network-action="redo"${redo.length?'':' disabled'} aria-label="Redo board edit">↷</button><button data-network-action="export">Export</button><button data-network-action="my-research">My Research</button><a href="/CRAWLER/account.html">Account ↗</a><a href="#topic-research">Market brief ↓</a></div><div class="network-grid"><aside class="network-sidebar"><label class="network-label" for="network-search">Find on this board</label><input id="network-search" value="${e(filter)}" placeholder="Company, author, contract…" autocomplete="off"><label class="network-label" for="network-evidence-filter">Evidence</label><select id="network-evidence-filter"><option value="">All evidence states</option>${['Verified','Corroborated','Reported','Review required','manual','questions'].map(s=>`<option value="${s}"${evidenceFilter===s?' selected':''}>${e(label(s))}</option>`).join('')}</select><label class="network-label" for="network-relationship-filter">Connection type</label><select id="network-relationship-filter"><option value="">All relationships</option>${relationships.map(s=>`<option value="${s}"${relationshipFilter===s?' selected':''}>${e(label(s))}</option>`).join('')}</select><div id="network-search-results"></div><nav class="network-navigation"><button data-network-action="my-research">My Research</button><button data-network-action="portfolios">Saved portfolios</button><button data-network-action="followed">Followed companies</button><button data-network-action="notifications">Notifications${personal?.notifications?.filter(n=>!n.read).length?' · '+personal.notifications.filter(n=>!n.read).length:''}</button></nav><section><h3>Recent investigations</h3>${(personal?.boards||[]).filter(r=>!r.archived).slice(0,8).map(r=>`<button class="network-recent" data-open-network-board="${e(r.id)}">${e(r.title)}</button>`).join('')||'<p>This board is saved to your workspace.</p>'}</section><section><h3>Research queue</h3><div id="network-tasks">${taskList()}</div><div class="network-queue-actions"><button data-network-action="pause">Pause</button><button data-network-action="resume">Resume</button><button data-network-action="cancel">Cancel</button></div></section><section><h3>Collections</h3>${b().groups.map(g=>`<button class="network-recent" data-network-group="${e(g.id)}">${e(g.label)} · ${g.nodeIds.length}</button>`).join('')||'<p>Shift-click nodes to select, then group.</p>'}</section><button data-network-action="unhide">Show hidden nodes</button></aside><div class="network-center"><div class="network-canvas" id="network-canvas" tabindex="0" aria-label="Pannable research graph. Drag background to pan, scroll to zoom, select a node to inspect. Shift click selects multiple nodes."><div id="network-world" class="network-world"></div><div class="network-canvas-hint">Drag to explore · double-click to expand · drag + to connect</div><div class="network-zoom"><button data-network-action="zoom-out" aria-label="Zoom out">−</button><span id="network-zoom-label">100%</span><button data-network-action="zoom-in" aria-label="Zoom in">+</button><button data-network-action="fit">Fit</button><button data-network-action="root">Topic</button></div><svg id="network-minimap" class="network-minimap" aria-label="Research graph mini-map" role="button" tabindex="0"></svg></div><div class="network-footer"><span id="network-counter"></span><span class="network-legend"><i class="verified"></i>Verified <i class="reported"></i>Reported <i class="question"></i>Question <i class="manual"></i>Personal</span><button data-network-action="show-more">Show more nodes</button></div><p id="network-feedback" class="network-feedback" role="status">${e(detail.graph.warning||topic?.progress||'')}</p></div><aside class="network-inspector" id="network-inspector"><span class="network-kicker">FOLLOW THE CONNECTIONS</span><h2>Start with the evidence.</h2><p>Select a node or line to inspect its original sources and research further.</p><p>Direct business links carry their own evidence. Dotted branches are open questions; purple connections are personal assertions.</p></aside></div>`;
+    host.innerHTML=`<section id="board-recommendations" aria-label="Topic investment research"><p class="network-loading">Assessing topic assets and market evidence…</p></section><div class="network-heading"><div><span class="network-kicker">RESEARCH OBSERVATION BOARD</span><h2>${e(b().title)}</h2></div><span id="network-save-state">${dirty?'Unsaved changes':'Saved privately'}${b().version?' · v'+b().version:''}</span></div><div class="network-toolbar" role="toolbar" aria-label="Observation board actions"><button id="network-save" data-network-action="save" class="network-primary">Save board</button><button data-network-action="research">Research further</button><button data-network-action="add">+ Add node</button><button data-network-action="arrange">Auto-arrange</button><button data-network-action="cleanup">Clean up nodes</button><button data-network-action="group">Group selected</button><button data-network-action="undo"${undo.length?'':' disabled'} aria-label="Undo board edit">↶</button><button data-network-action="redo"${redo.length?'':' disabled'} aria-label="Redo board edit">↷</button><button data-network-action="export">Export</button><button data-network-action="my-research">My Research</button><button data-network-action="workspace">Workspace ↗</button><a href="/CRAWLER/account.html">Account ↗</a><a href="#topic-research">Market brief ↓</a></div><div class="network-grid"><aside class="network-sidebar"><label class="network-label" for="network-search">Find on this board</label><input id="network-search" value="${e(filter)}" placeholder="Company, author, contract…" autocomplete="off"><label class="network-label" for="network-evidence-filter">Evidence</label><select id="network-evidence-filter"><option value="">All evidence states</option>${['Verified','Corroborated','Reported','Review required','manual','questions'].map(s=>`<option value="${s}"${evidenceFilter===s?' selected':''}>${e(label(s))}</option>`).join('')}</select><label class="network-label" for="network-relationship-filter">Connection type</label><select id="network-relationship-filter"><option value="">All relationships</option>${relationships.map(s=>`<option value="${s}"${relationshipFilter===s?' selected':''}>${e(label(s))}</option>`).join('')}</select><div id="network-search-results"></div><details class="node-type-key"><summary>Node color guide</summary><p>Green · companies<br>Blue · reporting and regions<br>Purple · products and suppliers<br>Gold · money and markets<br>Rose · open questions</p><p>Labels identify each type. Click a node to trace its immediate evidence connections.</p></details><nav class="network-navigation"><button data-network-action="my-research">My Research</button><button data-network-action="portfolios">Saved portfolios</button><button data-network-action="followed">Followed companies</button><button data-network-action="notifications">Notifications${personal?.notifications?.filter(n=>!n.read).length?' · '+personal.notifications.filter(n=>!n.read).length:''}</button></nav><section class="network-panel" data-network-library="portfolios"></section><section><h3>Recent investigations</h3>${(personal?.boards||[]).filter(r=>!r.archived).slice(0,8).map(r=>`<button class="network-recent" data-open-network-board="${e(r.id)}">${e(r.title)}</button>`).join('')||'<p>This board is saved to your workspace.</p>'}</section><section><h3>Research queue</h3><div id="network-tasks">${taskList()}</div><div class="network-queue-actions"><button data-network-action="pause">Pause</button><button data-network-action="resume">Resume</button><button data-network-action="cancel">Cancel</button></div></section><section><h3>Collections</h3>${b().groups.map(g=>`<button class="network-recent" data-network-group="${e(g.id)}">${e(g.label)} · ${g.nodeIds.length}</button>`).join('')||'<p>Shift-click nodes to select, then group.</p>'}</section><button data-network-action="unhide">Show hidden nodes</button></aside><div class="network-center"><div class="network-canvas" id="network-canvas" tabindex="0" aria-label="Pannable research graph. Drag background to pan, scroll to zoom, select a node to inspect. Shift click selects multiple nodes."><div id="network-world" class="network-world"></div><div class="network-canvas-hint">Drag to explore · double-click to expand · drag + to connect</div><div class="network-zoom"><button data-network-action="zoom-out" aria-label="Zoom out">−</button><span id="network-zoom-label">100%</span><button data-network-action="zoom-in" aria-label="Zoom in">+</button><button data-network-action="fit">Fit</button><button data-network-action="root">Topic</button></div><svg id="network-minimap" class="network-minimap" aria-label="Research graph mini-map" role="button" tabindex="0"></svg></div><div class="network-footer"><span id="network-counter"></span><span class="network-legend"><i class="verified"></i>Verified <i class="reported"></i>Reported <i class="question"></i>Question <i class="manual"></i>Personal</span><button data-network-action="show-more">Show more nodes</button></div><p id="network-feedback" class="network-feedback" role="status">${e(detail.graph.warning||topic?.progress||'')}</p></div><aside class="network-inspector" id="network-inspector"><span class="network-kicker">FOLLOW THE CONNECTIONS</span><h2>Start with the evidence.</h2><p>Select a node or line to inspect its original sources and research further.</p><p>Direct business links carry their own evidence. Dotted branches are open questions; purple connections are personal assertions.</p></aside></div>`;
     paintWorld();
     if(selected&&node(selected))inspectNode(selected);else if(selectedEdge&&allEdges().some(e=>e.id===selectedEdge))inspectEdge(selectedEdge);
     document.getElementById('network-canvas').addEventListener('wheel',wheel,{passive:false});
@@ -137,6 +175,8 @@
       if(w!==dimensions.w||h!==dimensions.h){b().viewport.x+=(w-dimensions.w)/2;b().viewport.y+=(h-dimensions.h)/2;dimensions={w,h};transform();changed();}
     });
     canvasObserver.observe(canvas);
+    window.dispatchEvent(new CustomEvent("crawler:board-ready", {detail:{boardId:b().id}}));
+    renderPanels();
   }
   async function attach(nextTopic) {
     topic=nextTopic;
@@ -180,7 +220,28 @@
     })().finally(()=>{saving=false;savePromise=null;if(button)button.disabled=false;});
     return savePromise;
   }
-  function feedback(message) { const target=document.getElementById('network-feedback');if(target)target.textContent=message; }
+  function feedback(message) { const target=document.getElementById('network-feedback');if(target)target.textContent=message;document.querySelectorAll('.network-panel-status').forEach(el=>{el.textContent=message;}); }
+  const portfolioRows=(p,compact)=>`<div class="network-portfolio-card"><div class="network-library-row"><b>${e(p.title)}${p.archived?' · Archived':''}</b><button data-network-delete-portfolio="${e(p.id)}" aria-label="Delete portfolio ${e(p.title)}">Delete</button></div>${(p.items||[]).slice(0,compact?5:50).map(i=>`<div class="network-library-row"><button data-network-followed-board="${e(i.boardId)}" data-node="${e(i.nodeId)}">${e(i.label)}<small>${e(i.researchStatus||i.reason||'')}</small></button><button data-network-remove-watch="${e(p.id)}" data-node="${e(i.nodeId)}" aria-label="Remove ${e(i.label)}">×</button></div>`).join('')||'<small>No items yet. Add nodes from a board.</small>'}</div>`;
+  function libraryHTML(kind) {
+    const data=personal||{boards:[],portfolios:[]},compact=kind==='portfolios';
+    const portfolios=`<div class="network-panel-heading"><h3>Watch portfolios · ${data.portfolios.length}</h3><button data-network-new-portfolio>+ New</button></div>${data.portfolios.map(p=>portfolioRows(p,compact)).join('')||'<p>No watch portfolios yet.</p>'}`;
+    if(compact)return portfolios;
+    const boards=`<div class="network-panel-heading"><h3>Research boards · ${data.boards.length}</h3></div>${data.boards.map(r=>`<div class="network-library-row"><button data-open-network-board="${e(r.id)}">${e(r.title)}<small>${e(r.folder||'Unfiled')}${r.archived?' · Archived':''}${r.updatedAt?' · '+new Date(r.updatedAt).toLocaleDateString():''}</small></button><button data-network-delete-board="${e(r.id)}" aria-label="Delete board ${e(r.title)}">Delete</button></div>`).join('')||'<p>Search a topic to create your first board.</p>'}`;
+    return `<h2>Research boards &amp; portfolios</h2>${boards}${portfolios}<p class="network-panel-status" role="status"></p>`;
+  }
+  // The same boards and portfolios render in the board sidebar and in the workspace watchlist.
+  async function renderPanels() {
+    const workspace=document.querySelector('#server-watchlist');
+    if(workspace&&!document.getElementById('workspace-research'))workspace.insertAdjacentHTML('beforebegin','<section id="workspace-research" class="research-box network-panel" data-network-library="all"></section>');
+    const panels=[...document.querySelectorAll('[data-network-library]')];if(!panels.length)return;
+    if(!personal&&api.connected){try{personal=await api.request('my-research');}catch(error){feedback(error.message);return;}}
+    for(const panel of panels)panel.innerHTML=libraryHTML(panel.dataset.networkLibrary);
+  }
+  async function personalChanged(view) {
+    personal=await api.request('my-research');
+    renderPanels();
+    if(document.getElementById('network-edit-dialog')?.open)library(view);
+  }
   function modal(content, title='Edit research') {
     document.getElementById('network-edit-dialog')?.remove();const dialog=document.createElement('dialog');dialog.id='network-edit-dialog';dialog.className='network-dialog';
     dialog.innerHTML=`<div class="network-dialog-title"><h2>${e(title)}</h2><button type="button" data-close-network aria-label="Close dialog">×</button></div>${content}`;
@@ -237,9 +298,9 @@
         if(dirty)await save();const task=await api.request('network/research',{boardId:b().id,nodeId:form.dataset.node,edgeId:form.dataset.edge||undefined,focus:values.focus,depth:Number(values.depth),automatic:form.elements.automatic.checked});
         detail.tasks.unshift(task);document.getElementById('network-tasks').innerHTML=taskList();feedback('Queued '+label(task.focus)+' research for '+task.label+'.');
       }else if(form.id==='network-watch-form'){
-        if(dirty)await save();await api.request('portfolios',{id:values.portfolioId||undefined,title:values.portfolioId?undefined:values.title,nodeId:form.dataset.node,boardId:b().id,reason:values.reason});personal=await api.request('my-research');document.getElementById('network-edit-dialog').close();feedback('Added to your watch portfolio.');
+        if(dirty)await save();await api.request('portfolios',{id:values.portfolioId||undefined,title:values.portfolioId?undefined:values.title,nodeId:form.dataset.node,boardId:b().id,reason:values.reason});personal=await api.request('my-research');document.getElementById('network-edit-dialog').close();renderPanels();feedback('Added to your watch portfolio.');
       }else if(form.id==='network-board-properties'){checkpoint();Object.assign(b(),values);changed();await save();document.getElementById('network-edit-dialog').close();render();
-      }else if(form.id==='network-new-portfolio'){await api.request('portfolios',values);personal=await api.request('my-research');library('portfolios');
+      }else if(form.id==='network-new-portfolio'){await api.request('portfolios',values);await personalChanged('portfolios');
       }else if(form.id==='network-group-form'){checkpoint();b().groups.push({id:uid(),label:values.label,nodeIds:[...selection]});changed();document.getElementById('network-edit-dialog').close();render();
       }else if(form.id==='network-notification-settings'){personal=await api.request('my-research',{notificationSettings:form.elements.enabled.checked});feedback('Notification preferences saved.');document.getElementById('network-edit-dialog').close();}
     }catch(error){feedback(error.message);const dialog=document.getElementById('network-edit-dialog');if(dialog){let p=dialog.querySelector('.network-dialog-error');if(!p){p=document.createElement('p');p.className='network-dialog-error';dialog.append(p);}p.textContent=error.message;}}
@@ -255,8 +316,20 @@
     try{
       if(target.dataset.openNetworkBoard){document.getElementById('network-edit-dialog')?.close();await openBoard(target.dataset.openNetworkBoard);return;}
       if(target.dataset.networkFollowedBoard){document.getElementById('network-edit-dialog')?.close();await openBoard(target.dataset.networkFollowedBoard);setTimeout(()=>focusNode(target.dataset.node),300);return;}
-      if(target.dataset.networkRemoveWatch){await api.request('portfolios',{id:target.dataset.networkRemoveWatch,removeNodeId:target.dataset.node});personal=await api.request('my-research');library('portfolios');return;}
-      if(target.dataset.networkDeletePortfolio){await api.request('portfolios',{id:target.dataset.networkDeletePortfolio,delete:true});personal=await api.request('my-research');library('portfolios');return;}
+      if(target.dataset.networkRemoveWatch){await api.request('portfolios',{id:target.dataset.networkRemoveWatch,removeNodeId:target.dataset.node});await personalChanged('portfolios');return;}
+      if(target.dataset.networkDeletePortfolio){
+        const name=personal?.portfolios.find(p=>p.id===target.dataset.networkDeletePortfolio)?.title||'this portfolio';
+        if(!confirm('Delete portfolio "'+name+'"? Its watched items are removed; boards are kept.'))return;
+        await api.request('portfolios',{id:target.dataset.networkDeletePortfolio,delete:true});await personalChanged('portfolios');return;
+      }
+      if(target.dataset.networkDeleteBoard){
+        const id=target.dataset.networkDeleteBoard,name=personal?.boards.find(r=>r.id===id)?.title||'this board';
+        if(!confirm('Delete board "'+name+'" and its saved layouts? Shared source records remain available.'))return;
+        await api.request('boards/action',{id,action:'delete'});
+        const wasOpen=detail?.board.id===id;if(wasOpen){detail=null;dirty=false;}
+        await personalChanged('boards');if(wasOpen)window.CrawlerStart.showStart();return;
+      }
+      if(target.dataset.networkNewPortfolio!==undefined){const title=prompt('Portfolio name');if(title?.trim()){await api.request('portfolios',{title:title.trim()});await personalChanged('portfolios');}return;}
       if(target.dataset.networkEditPortfolio){
         const p=personal.portfolios.find(p=>p.id===target.dataset.networkEditPortfolio);
         modal(`<form id="network-portfolio-editor" data-id="${e(p.id)}"><label>Name<input name="title" value="${e(p.title)}" required maxlength="200"></label><label>Description<textarea name="description" maxlength="2000">${e(p.description)}</textarea></label><label>Folder<input name="folder" maxlength="100" value="${e(p.folder)}"></label><label class="network-check"><input name="archived" type="checkbox"${p.archived?' checked':''}>Archive this portfolio</label><button type="submit">Save portfolio</button></form>`,'Edit watch portfolio');return;
@@ -288,6 +361,8 @@
       if(action==='unhide'){checkpoint();b().hidden=[];b().collapsed=[];changed();render();return;}
       if(action==='duplicate-node'){const original=node(id);checkpoint();const copy={...clone(original),id:uid(),origin:'manual',status:'User assertion',label:original.label+' · personal copy',evidence:[]};b().manualNodes.push(copy);const pos=position(id);b().layout[copy.id]={x:pos.x+80,y:pos.y+130};changed();render();inspectNode(copy.id);return;}
       if(action==='group'){if(!selection.size){feedback('Shift-click nodes to select a group first.');return;}modal('<form id="network-group-form"><label>Collection name<input name="label" required maxlength="120"></label><button type="submit">Group selected nodes</button></form>','Name this research branch');return;}
+      if(action==='cleanup'){cleanUp();return;}
+      if(action==='workspace'){if(dirty)await save();window.CrawlerStart.showWorkspace();window.CrawlerHub.navigate('watchlist');return;}
       if(action==='arrange'){checkpoint();b().layout={};initialLayout();changed();paintWorld();fit();return;}
       if(action==='undo'&&undo.length){const version=b().version;redo.push(clone(b()));detail.board=undo.pop();b().version=version;changed();render();return;}
       if(action==='redo'&&redo.length){const version=b().version;undo.push(clone(b()));detail.board=redo.pop();b().version=version;changed();render();return;}
@@ -320,8 +395,28 @@
     if(handle){event.preventDefault();connecting={from:handle.dataset.connectFrom};canvas.setPointerCapture(event.pointerId);return;}
     if(card&&!space&&event.button!==1){const id=card.dataset.networkNode;drag={mode:'node',id,locked:b().pinned.includes(id),start:point(event),origin:{...position(id)},clientX:event.clientX,clientY:event.clientY,moved:false};}
     else drag={mode:'pan',start:{x:event.clientX,y:event.clientY},origin:{...b().viewport},moved:false};
+    event.preventDefault(); window.getSelection()?.removeAllRanges();
     canvas.setPointerCapture(event.pointerId);
   });
+  let dragFrame = null;
+  function scheduleDragPaint() {
+    if (dragFrame !== null) return;
+    dragFrame = requestAnimationFrame(() => {
+      dragFrame = null;
+      if (!active()) return;
+      for (const el of document.querySelectorAll('[data-network-node]')) {
+        const p = position(el.dataset.networkNode); el.style.left=p.x+'px'; el.style.top=p.y+'px';
+      }
+      const edgeMap = new Map(allEdges().map(edge => [edge.id,edge]));
+      for (const el of document.querySelectorAll('[data-network-edge]')) {
+        const edge=edgeMap.get(el.dataset.networkEdge); if(!edge)continue;
+        el.querySelectorAll('path').forEach(path=>path.setAttribute('d',linePath(edge)));
+        const from=position(edge.from),to=position(edge.to),text=el.querySelector('text');
+        text.setAttribute('x',(from.x+to.x)/2+nodeWidth/2);text.setAttribute('y',(from.y+to.y)/2+nodeHeight/2-9);
+      }
+      minimap();
+    });
+  }
   document.addEventListener('pointermove',event=>{
     if(!active())return;
     if(connecting){const current=point(event),from=position(connecting.from),path=document.getElementById('network-connecting-line');if(path)path.setAttribute('d',`M ${from.x+nodeWidth} ${from.y+nodeHeight/2} L ${current.x} ${current.y}`);return;}
@@ -329,7 +424,7 @@
     if(drag.mode==='node'){
       if(drag.locked)return;
       const current=point(event);if(!drag.moved&&Math.hypot(event.clientX-drag.clientX,event.clientY-drag.clientY)>4){checkpoint();drag.moved=true;}
-      if(drag.moved){b().layout[drag.id]={x:drag.origin.x+current.x-drag.start.x,y:drag.origin.y+current.y-drag.start.y};changed();paintWorld();}
+      if(drag.moved){b().layout[drag.id]={x:drag.origin.x+current.x-drag.start.x,y:drag.origin.y+current.y-drag.start.y};changed();scheduleDragPaint();}
     }else{if(!drag.moved){checkpoint();drag.moved=true;}b().viewport={...drag.origin,x:drag.origin.x+event.clientX-drag.start.x,y:drag.origin.y+event.clientY-drag.start.y};transform();changed();}
   });
   document.addEventListener('pointerup',event=>{
@@ -382,8 +477,9 @@
     try{const result=await api.request('boards?id='+encodeURIComponent(boardId));if(!active()||b().id!==boardId)return;
       const graphChanged=result.graph.version!==detail.graph.version||result.graph.nodes.length!==detail.graph.nodes.length;
       if(!dirty&&!saving){const view=b().viewport;detail=result;detail.board.viewport=view;}else{detail.graph=result.graph;detail.tasks=result.tasks;}
+      window.dispatchEvent(new CustomEvent("crawler:board-ready", {detail:{boardId:b().id}}));
       const tasks=document.getElementById('network-tasks');if(tasks)tasks.innerHTML=taskList();
-      if(graphChanged){paintWorld();feedback('New source-backed findings are available. Your layout and notes are preserved.');}
+      if(graphChanged){paintWorld();changed();feedback('New source-backed findings are available. Your layout and notes are preserved.');}
     }catch(error){feedback(error.message);}finally{pending=false;}
   }
   window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
@@ -392,5 +488,7 @@
     if(api.connected&&boardId&&!detail&&!pending){pending=true;openBoard(boardId).catch(e=>{const target=document.getElementById('start-feedback');if(target)target.textContent=e.message;}).finally(()=>{pending=false;history.replaceState(null,'',location.pathname);});}
   });
   setInterval(poll,10000);
-  window.CrawlerNetwork={attach,openBoard,save,get detail(){return detail;},get dirty(){return dirty;}};
+  window.CrawlerNetwork={attach,openBoard,save,renderPanels,get detail(){return detail;},get dirty(){return dirty;}};
 })();
+
+

@@ -14,7 +14,7 @@ NODE_TYPES = {"topic", "article", "journalist", "publisher", "event", "company",
 EDGE_TYPES = {"authored_by", "published_by", "reports_on", "manufactured_by", "owned_by", "subsidiary_of", "partnered_with",
               "invested_in", "financed_by", "contract_awarded_to", "supplied_by", "competes_with", "produces", "common_ownership",
               "references", "research_question", "user_defined"}
-FOCUSES = {"overview": "public corporate records and documented relationships", "ownership": "registered ownership, directors, parent companies and other ownership interests",
+FOCUSES = {"costs": "documented unit and total costs, currencies, dates, changes over time, supplier inputs and evidence for cost drivers; distinguish correlation from causation", "questions": "resolve this open question using original sources; identify uncertainty, missing measurements, contradictions and testable follow-up questions", "overview": "public corporate records and documented relationships", "ownership": "registered ownership, directors, parent companies and other ownership interests",
            "finances": "financial statements, original currencies and reporting periods, disclosed financing and lenders",
            "contracts": "public procurement references, contracting agencies, award dates, status and original total value and currency",
            "suppliers": "public non-operational commercial supply agreements and disclosed manufacturing partners",
@@ -152,6 +152,7 @@ class ResearchNetwork:
 
     def build(self, topic_id, use_ai=False):
         topic = self.s.topics.get(topic_id)
+        if topic.get("deleted"): return {"id": topic_id, "rootId": "", "nodes": [], "edges": [], "warning": "Topic deleted"}
         root, nodes, edges, docs = self._base(topic)
         originals = _documents(docs)
         fingerprint = a.digest(dumps([(d["id"], d["version"]) for d in docs]))
@@ -250,19 +251,34 @@ class ResearchNetwork:
                         item.update(researchStatus="Updated evidence — review" if current else "Prior finding no longer supported", evidenceUpdatedAt=now_ms())
                     portfolio["updatedAt"] = now_ms()
                     self.db.put("researchPortfolio", portfolio["id"], portfolio)
-            if board["topicId"] == topic_id:
+            if board["topicId"] == topic_id or topic_id in board.get("branchTopics", []):
                 self._automatic_branches(board, value)
         return value
 
     def _automatic_branches(self, board, graph):
         if not self.s.auto_ai or not self.s.ai.ready or not graph.get("extractionModel") or board.get("expansionState") != "running": return
         if board.get("automaticFingerprint") == graph.get("sourceFingerprint"): return
-        candidates = [node for node in graph["nodes"] if node["type"] in {"company", "financial_institution"}
-            and any(edge["type"] not in {"references", "research_question"} and node["id"] in (edge["from"], edge["to"]) for edge in graph["edges"])]
+        candidates = []
+        by_id = {n["id"]: n for n in graph["nodes"]}
+        for edge in graph["edges"]:
+            if edge.get("status") in {"Disputed", "Review required"}:
+                node = by_id.get(edge["to"])
+                if node: candidates.append((node, "contradictions", edge["id"]))
+        candidates += [(n, "questions", None) for n in graph["nodes"] if n["type"] == "question"]
+        candidates += [(n, "ownership", None) for n in graph["nodes"] if n["type"] in {"company", "financial_institution"}
+            and any(e["type"] not in {"references", "research_question"} and n["id"] in (e["from"], e["to"]) for e in graph["edges"])]
         if not candidates: return
-        for node in candidates[:2]:
-            try: self.request_task(board["ownerId"], {"boardId": board["id"], "nodeId": node["id"], "focus": "ownership", "depth": 2, "automatic": True})
+        queued = 0
+        for node, focus, edge_id in candidates:
+            key = a.digest(dumps([graph.get("sourceFingerprint"), node["id"], focus, edge_id]))
+            if any(t.get("reviewKey") == key and t.get("boardId") == board["id"] for t in self.db.latest("researchTask", 10000)): continue
+            try:
+                task = self.request_task(board["ownerId"], {"boardId": board["id"], "nodeId": node["id"], "focus": focus, "depth": 2, "automatic": True, **({"edgeId": edge_id} if edge_id else {})})
+                task.update(reviewKey=key, reviewReason="Unanswered question or changed evidence", sourceFingerprint=graph.get("sourceFingerprint"))
+                self.db.put("researchTask", task["id"], task)
             except ValueError: return
+            queued += 1
+            if queued >= 2: break
         with self.s.lock:
             current = self.db.get("researchBoard", board["id"])
             if current:
@@ -310,12 +326,20 @@ class ResearchNetwork:
         extra_graphs = [self.db.get("networkGraph", tid) for tid in board.get("branchTopics", [])[:30]]
         nodes = {node["id"]: node for node in graph["nodes"]}
         edges = {edge["id"]: edge for edge in graph["edges"]}
+        anchors = board.get("branchAnchors", {})
         for branch in extra_graphs:
             if not branch: continue
+            # The branch's own root is replaced by the board node that was researched.
+            anchor = anchors.get(branch["topicId"])
             for node in branch["nodes"]:
                 if node["type"] != "topic": nodes[node["id"]] = node
             for edge in branch["edges"]:
-                if edge["from"] in nodes and edge["to"] in nodes: edges[edge["id"]] = edge
+                if anchor and branch["rootId"] in (edge["from"], edge["to"]):
+                    edge = {**edge, "from": anchor if edge["from"] == branch["rootId"] else edge["from"], "to": anchor if edge["to"] == branch["rootId"] else edge["to"]}
+                    if edge["from"] == edge["to"] or anchor not in nodes and anchor not in {n["id"] for n in board["manualNodes"]}: continue
+                    if edge["from"] != anchor and edge["from"] not in nodes or edge["to"] != anchor and edge["to"] not in nodes: continue
+                    edges[edge["id"] + ":" + anchor] = {**edge, "id": edge["id"] + ":" + anchor}
+                elif edge["from"] in nodes and edge["to"] in nodes: edges[edge["id"]] = edge
         for edge in board.get("branchConnections", []): edges[edge["id"]] = edge
         for row in list(nodes.values()) + list(edges.values()):
             if row.get("evidence") and not self._current(row["evidence"]): row.update(status="Review required", lastVerifiedAt=None)
@@ -383,7 +407,7 @@ class ResearchNetwork:
             return {"deleted": True}
         if action == "duplicate":
             new = self.create_board(owner, {"topicId": board["topicId"], "duplicate": True, "title": board["title"] + " copy"})["board"]
-            for field in ("layout", "manualNodes", "manualEdges", "notes", "groups", "hidden", "pinned", "collapsed", "expanded", "viewport", "branchTopics", "branchConnections"):
+            for field in ("layout", "manualNodes", "manualEdges", "notes", "groups", "hidden", "pinned", "collapsed", "expanded", "viewport", "branchTopics", "branchConnections", "branchAnchors"):
                 if field in board: new[field] = copy.deepcopy(board[field])
             self.db.put("researchBoard", new["id"], new)
             self.db.put("boardRevision", new["id"] + ":v1", new)
@@ -401,12 +425,26 @@ class ResearchNetwork:
             if task.get("boardId") != board["id"] or task.get("ownerId") != owner or task["status"] in {"Complete", "Cancelled", "Failed"}: continue
             task["status"] = {"pause": "Paused", "resume": "Queued", "cancel": "Cancelled"}[action]
             self.db.put("researchTask", task["id"], task)
+            if action in {"pause", "cancel"} and task.get("childTopicId"):
+                shared = any(t.get("childTopicId") == task["childTopicId"] and t.get("boardId") != board["id"] and t["status"] not in {"Complete", "Cancelled", "Failed", "Paused"} for t in self.db.latest("researchTask", 10000))
+                if not shared: self.s.topics.configure(task["childTopicId"], {"enabled": False})
+            if action == "resume" and task.get("childTopicId"): self.s.topics.refresh(task["childTopicId"])
             if action == "resume": self.db.enqueue("network-research", {"taskId": task["id"]}, identifier("resume"))
         return self.board(owner, board["id"])
 
     def delete_board(self, owner, board_id):
         self._owned("researchBoard", board_id, owner)
         self.db.delete("researchBoard", board_id)
+        self.db.delete("recommendationSnapshot", board_id)
+        for row in self.db.scan("recommendationRevision"):
+            if row.get("boardId") == board_id and row.get("ownerId") == owner:
+                self.db.delete("recommendationRevision", board_id + ":" + str(row["revision"]))
+        for portfolio in self.db.latest("researchPortfolio", 10000):
+            if portfolio["ownerId"] != owner: continue
+            kept = [item for item in portfolio.get("items", []) if item.get("boardId") != board_id]
+            if len(kept) != len(portfolio.get("items", [])):
+                portfolio.update(items=kept, updatedAt=now_ms())
+                self.db.put("researchPortfolio", portfolio["id"], portfolio)
         for kind in ("boardRevision", "researchTask", "researchNotification"):
             for row in self.db.latest(kind, 20000):
                 if row.get("ownerId") == owner and (row.get("boardId") == board_id or kind == "boardRevision" and row["id"] == board_id):
@@ -537,7 +575,7 @@ class ResearchNetwork:
             if task.get("proposedConnection"):
                 proposal = task["proposedConnection"]
                 query = ("Is there independent public evidence for the unverified proposed relationship: " + proposal["from"][:180] + " " + proposal["type"].replace("_", " ") + " " + proposal["to"][:180] + "? Seek confirmation and contradictions.")[:900]
-            child = self.s.topics.create(query)
+            child = self.s.topics.create({"query": query, "embedded": True})
             task.update(childTopicId=child["id"], status="Collecting sources")
         else:
             child = self.s.topics.get(task["childTopicId"])
@@ -546,6 +584,8 @@ class ResearchNetwork:
             if task["visits"] > 40: task.update(status="Failed", message="Source research did not complete. Retry from the node after reviewing server jobs.")
             else: self.db.enqueue("network-research", {"taskId": task_id}, "network-wait:" + task_id + ":" + str(task["visits"]), delay=15)
             return self.db.put("researchTask", task_id, task)
+        current_board = self.db.get("researchBoard", task["boardId"])
+        if not current_board or current_board["expansionState"] != "running": return self.db.get("researchTask", task_id)
         graph = self.build(child["id"], use_ai=True)
         # A user cancellation arriving during network work must survive completion.
         with self.s.lock:
@@ -553,22 +593,15 @@ class ResearchNetwork:
             if not board or board["expansionState"] != "running": return self.db.get("researchTask", task_id)
             branches = list(dict.fromkeys(board.get("branchTopics", []) + [child["id"]]))
             board["branchTopics"] = branches[-30:]
-            links = board.get("branchConnections", [])
-            for node in graph["nodes"]:
-                if node["type"] != "article": continue
-                edge_id = _stable("branch", task["nodeId"] + node["id"])
-                if not any(e["id"] == edge_id for e in links):
-                    links.append({"id": edge_id, "from": task["nodeId"], "to": node["id"], "type": "research_question", "status": "Research question",
-                                  "origin": "system", "claim": "Source retrieved during focused research; inspect the evidence", "evidence": [], "observedAt": now_ms(), "lastVerifiedAt": None})
-            board["branchConnections"] = links[-300:]
+            board["branchAnchors"] = {**{k: v for k, v in board.get("branchAnchors", {}).items() if k in board["branchTopics"]}, child["id"]: task["nodeId"]}
             self.db.put("researchBoard", board["id"], board)
         task.update(status="Complete", updatedAt=now_ms(), message=graph.get("warning") or "Source-backed branch research completed", nodesFound=len(graph["nodes"]))
         self.db.put("researchTask", task_id, task)
         if task["automatic"] and self.s.auto_ai and task["depth"] > 1:
-            candidates = [n for n in graph["nodes"] if n["type"] in {"company", "financial_institution", "person", "product"} and any(e["type"] not in {"references", "research_question"} and n["id"] in (e["from"], e["to"]) for e in graph["edges"])]
+            candidates = [n for n in graph["nodes"] if n["type"] == "question" or n["type"] in {"company", "financial_institution", "person", "product"} and any(e["type"] not in {"references", "research_question"} and n["id"] in (e["from"], e["to"]) for e in graph["edges"])]
             for node in candidates[:2]:
                 if any(t["nodeId"] == node["id"] and t["focus"] == "ownership" and t["status"] not in {"Failed", "Cancelled"} for t in self.board(task["ownerId"], board["id"])["tasks"]): continue
-                self.request_task(task["ownerId"], {"boardId": board["id"], "nodeId": node["id"], "focus": "ownership", "depth": task["depth"] - 1, "automatic": True})
+                self.request_task(task["ownerId"], {"boardId": board["id"], "nodeId": node["id"], "focus": "questions" if node["type"] == "question" else "ownership", "depth": task["depth"] - 1, "automatic": True})
         return task
 
     def review_edge(self, edge_id, reviewer, status, reason):
@@ -589,3 +622,5 @@ class ResearchNetwork:
                 self.db.put("networkGraph", graph["id"], graph)
                 self.db.put("networkRevision", graph["id"] + ":v" + str(graph["version"]), graph)
         return edge
+
+

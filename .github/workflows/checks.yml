@@ -18,6 +18,8 @@ jobs:
           node-version: '22'
       - name: Validate JavaScript syntax
         run: find js -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Frontend research and connection regressions
+        run: node --test tests/research.test.cjs tests/connection.test.cjs tests/recommendations-ui.test.cjs
       - name: Unit and integration tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
         env:
@@ -26,3 +28,5 @@ jobs:
           OPENAI_MODEL: ''
           DATABASE_URL: ''
           S3_BUCKET: ''
+
+

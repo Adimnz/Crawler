@@ -28,8 +28,6 @@ On local hardware, adjust `CRAWLER_WORKERS`, `CRAWLER_HTTP_CONNECTIONS`, and `CR
 
 Connected browser tabs display a prominent **server offline** notice and stop live API refreshes once the server is unavailable. Browsers intentionally do not allow a server to forcibly close tabs that it did not open programmatically; external applications and operating-system processes are not killed. Closing the browser window alone does **not** stop an intentionally unattended research server.
 
-**Security:** An earlier commit included a tracked `API KEY.txt` file containing a possible secret. The file has been removed from the current review branch and is now ignored, but it remains in existing Git history. Rotate any credentials that were stored in it and separately clean affected Git history if required. Never store API keys in the repository.
-
 ## Search first
 
 The default page is a centered search bar beneath **“Where do I start”**. Enter a topic, industry, company, or idea. Results open an interactive **Research Observation Board**, followed by the source-linked market brief, drivers, risks, and connected **companies, markets, and financial institutions**. Click **Market brief** to jump directly to the report. **Your topics** reopens previous searches; a fresh visit starts with the clean search screen.
@@ -69,7 +67,7 @@ The [expanded specification](docs/DEEP_RESEARCH_NETWORK_SPEC.md) is retained as 
 
 ## Personal accounts — Supabase
 
-The supplied project is prefilled as **`https://lowvafwxnuqtogsfkmkd.supabase.co`**. To finish connecting it:
+Personal accounts require your own Supabase project, configured privately on the research server. No project URL or credentials are bundled. To connect an account provider:
 
 1. Start the Python server and open **Account → Account provider setup**. Enter the project's **publishable / anon key**, then choose **Verify & connect**. Alternatively set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in `CRAWLER/.env` and restart.
 2. In Supabase Authentication, enable email/password sign-in and email confirmation. Configure email delivery and allow the local redirect URL **`http://127.0.0.1:8765/CRAWLER/account.html?view=callback`**. If using another host or port, allow its exact callback instead. For deployment set `CRAWLER_PUBLIC_URL` to the app's HTTPS origin and allow the corresponding callback.
@@ -86,7 +84,7 @@ Local research remains available as `local-owner` without registration. Account 
 
 | Area | What runs now | Configuration or practical limit |
 | --- | --- | --- |
-| Acquisition | Server RSS/Atom workers, generic mapped JSON connectors, CoinGecko and FRED adapters, adaptive polling, bounded retries, Retry-After, durable job leases, dead-letter recovery, raw content-addressed storage, permitted document retrieval/import | Configure provider credentials and permissions. Default RSS sources are a small starting set. No licensed data subscription is included. |
+| Acquisition | Server RSS/Atom workers, a public-feed catalogue, mapped JSON connectors, CoinGecko and FRED adapters, conditional polling, bounded retries, Retry-After, durable job leases, dead-letter recovery, raw content-addressed storage, permitted document retrieval/import | The Sources directory shows measured availability and usable contributions. Configure provider credentials and permissions for licensed data; subscriptions are not included. |
 | Verification | Sentence-level claim extraction; optional AI extraction with exact quote-span validation; candidate reporting chains; possible numerical/negation conflicts; explicit reviews; source revisions; correction/retraction propagation; additional high-consequence review | Detectors produce review candidates. They do not prove truth, independence, or authenticity. Hidden syndication still needs review. |
 | Multilingual coverage | Original-language preservation, optional English translation, reviewed publisher geography, local-coverage gaps | Translation requires configured AI. Source geography and regions mentioned in text are separate metadata. |
 | Trends | Hourly counts, coverage-adjusted windows, same-weekday/hour seasonal samples, robust MAD anomaly scores, lexical semantic clustering, optional vectors, persistent lifecycle history and periodic reassessment | Baselines require 95% uptime, a stable source set, and 70% provider availability across both windows. Seasonal scores need three covered historical samples. |
@@ -167,6 +165,36 @@ For article records, use `recordType: "document"` with fields `title`, `text`, `
 
 Feeds and permitted documents check robots.txt, public HTTPS destinations, response size, redirects, and host rate spacing. Full-document retrieval is disabled until enabled for a source. Network requests reject private, loopback, link-local, and reserved destinations and pin validated IPs during TLS connections. XML entity declarations are rejected. The legacy browser fallback can still use public CORS proxies; server collection does not use those proxies.
 
+### Sources directory and efficient collection
+
+Open **Sources** beside the search bar to search publishers, filter by content type or connection status, inspect collected headlines, add a public RSS/Atom feed, and queue collection. It loads on demand and renders twelve sources at a time. Connected sources appear first. The original centered search screen remains the default.
+
+The catalogue includes all requested publishers: Flipboard, NPR, The New York Times, BBC, NBC, ProPublica, The Intercept, Democracy Now!, The Marshall Project, Inside Climate News, Reuters discovery, Business Insider, CNBC, Yahoo Finance, Bloomberg and Google News. Added reporting and analysis includes Bellingcat, ICIJ, 404 Media, Capital & Main, Global Voices, Grist, Al Jazeera, DW, France 24, Calculated Risk, Aswath Damodaran, Marginal Revolution, Ben Carlson, Nick Maggiulli, Noah Smith and Matt Stoller. Ipsos and Pew provide survey-research connections. Public finance discussions include RSS connections and the documented [Hacker News search API](https://hn.algolia.com/api).
+
+Availability is measured, not assumed. See [the live connection report](docs/feed-connection-check.json) for the dated result of the collection run. Some endpoints deny automated access or have temporary failures. Those remain visible with their error and next retry time. The Yahoo endpoint was updated from its obsolete 404 URL, but its destination currently disallows collection. Reuters is explicitly a Google News discovery connection; direct Reuters delivery needs authorized provider access. These entries do not claim a working licensed feed.
+
+Reporting, official releases, commentary and survey research carry their content role into AI topic synthesis. Discovery headlines and community discussions are stored separately as **research leads**; they do not create verified claims, factual relationship edges or prices. Relevant discovery links can enter the existing bounded original-page retrieval workflow. Community discussions can be inspected and opened directly. Survey headlines require their underlying methodology before interpreting them as population estimates. Private chats, login-only forums and subscriber-only text need an authorized connector. Numeric market observations remain with the existing instrument-aware financial connectors.
+
+Collection now uses ETag/Last-Modified validators where supplied, recognizes HTTP 304, deduplicates unchanged entries before indexing, checks redirected feed permissions, isolates rejected entries, and records per-poll new/revised/unchanged/rejected counts and duration. Source endpoints and paused choices edited by the user are preserved when catalogue updates are installed. Known obsolete default endpoints are repaired. Legacy HTTP article links are upgraded only for the configured Democracy Now! and Calculated Risk hosts, preserving the publisher-supplied URL in raw metadata.
+
+Polling requests coalesce into one queued job per source and respect provider cooldowns. With the default two workers, one is reserved for topic/board research and the other processes collection and background analysis. `CRAWLER_WORKERS=4` allows three background workers. Host spacing and bounded retries remain active. Initial archive collection can take several minutes; subsequent unchanged polls avoid indexing and analysis work. Browser archive synchronization uses at most two 100-document pages per pass and yields while processing. No archive or feed directory requests run on the idle search screen.
+
+Run a repeatable connection check without storing articles:
+
+```powershell
+python CRAWLER/tools/poll_sources.py --report CRAWLER/data/feed-check.json
+```
+
+Collect into the application's database without starting AI workers:
+
+```powershell
+python CRAWLER/tools/poll_sources.py --collect --report CRAWLER/data/feed-check.json
+# Optional: limit a check or collection to particular source IDs
+python CRAWLER/tools/poll_sources.py --collect --source bbc-business --source hn-api
+```
+
+Use `--data-dir` for a separate SQLite archive; an already-set `DATABASE_URL` selects PostgreSQL. The command does not load `.env` or schedule paid enrichment. For configured/credentialed connectors, use the running server's **Poll enabled sources** action. Read `/api/source-items?id=…` for bounded contribution previews; owner-only POST `/api/sources/poll-all` queues enabled sources without waiting for remote requests.
+
 ### Database and raw objects
 
 `CRAWLER/data/` contains the default `research.sqlite3` and content-addressed raw objects. Source versions are append-only. Back up both together.
@@ -216,8 +244,57 @@ node CRAWLER/tests/search-browser.cjs
 node CRAWLER/tests/loading-browser.cjs
 node CRAWLER/tests/market-research-browser.cjs
 node CRAWLER/tests/network-browser.cjs
+node CRAWLER/tests/sources-browser.cjs
 ```
 
 The first starts a static server and checks fallback, navigation, review gates, local persistence, search, exports, and responsive layout. The second starts an isolated fixture research server and checks sync, extracted/reviewed claims, citations, monitors, briefs, connectors, replay, and revision deduplication. The market research suite checks a manual connected-model search with background AI off, a cited market brief and three types of watch subjects despite no financial instrument qualification, refreshes and mobile layout. Fixtures never enter the real application database. External providers are blocked during browser tests. Live AI, PostgreSQL, S3, licensed data, PDF, and C2PA adapters need configured integration environments.
 
 Network tests cover entity/relationship citation checks, missing/negated supplier evidence, bylines, review invalidation, source updates, private ownership, exact layout persistence, manual assertion isolation, revisions and bounded tasks. Account tests cover provider contracts, token storage, CSRF rotation, MFA authorization and cross-account denial. The board browser test exercises canvas gestures, group/undo/redo, save/reopen, focused research, responsive layout, account forms and workspace separation.
+
+
+
+## Unified workspace and observation board
+
+The persistent navigation lists saved topics beside Priority Signals, The Mark,
+Newsstand, All Activity, Watchlist, and Sources & System. Topic stop/delete actions
+are above the board. Stop cancels personal branch tasks and prevents further topic
+stages; an already-running provider request may finish before cancellation is
+observed. Shared research remains available to other subscribers. Delete removes
+personal boards and the subscription, retaining collected source evidence.
+
+Priority Signals, Newsstand and All Activity group cards by category. The Mark
+shows provider stock/crypto quotes, timestamps and stale/unavailable labels,
+without research rankings. Sources and ticker connections survive navigation.
+A request timeout triggers a readiness check; three consecutive failed readiness
+checks mark the server disconnected. This fixes a false-offline path, but does not
+prove the cause of every disconnect on a particular installation.
+
+The board uses type colors plus text labels. Selecting a node animates its direct
+connections and dims unrelated nodes to 30%. Reduced-motion settings disable the
+animation. Dragging updates existing nodes/paths once per animation frame and
+suppresses text selection. Sidebars are wider and stack on narrower displays.
+
+Automatic follow-up research prioritizes disputed/review-required relationships
+and unanswered questions, then ownership. It requires automatic AI to be enabled,
+queues at most two tasks per changed evidence fingerprint, and preserves the
+existing eight-active-task and depth limits. Branch answers can produce follow-up
+question investigations within that depth budget. Cost research asks for original
+currency, dates, supplier inputs and evidence for changes; missing or conflicting
+evidence remains uncertainty, not a fact.
+
+Regression checks: `python -m unittest discover -s tests -p 'test_*.py'` and
+`node --test tests/research.test.cjs tests/connection.test.cjs`. Browser gesture
+and visual tests remain in `tests/*-browser.cjs` and require a local Chromium
+installation and `PLAYWRIGHT_MODULE` / `CHROME_PATH` configuration.
+
+
+## Topic investment recommendations
+
+The observation board now includes source-linked asset candidates, a fixed
+historical-analogue price model, purged chronological validation, conditional
+return ranges, cost inputs, expiration and versioned recommendation changes.
+Missing data, contradictions or failed validation return **Wait / insufficient
+evidence**. Numerical article-to-return effects are not fabricated. See
+[the recommendation methodology and setup](docs/TOPIC_RECOMMENDATIONS.md) for the
+exact gates, historical availability limits, optional adjusted daily equity
+connector, background refresh and remaining model limitations.
