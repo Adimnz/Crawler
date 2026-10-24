@@ -201,6 +201,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/my-research/export": return service.network_research.export_personal(owner)
         if path == "/api/network-node": return service.network_research.inspect(owner, value("boardId"), value("id"))
         if path == "/api/board-recommendations": return service.recommendations.view(owner, value("boardId"), full=value("full")=="1")
+        if path == "/api/research-activity": return service.activity.feed(owner, value("boardId"))
         raise ValueError("Unknown private research route")
 
     def private_post(self, path, body, session):
@@ -213,6 +214,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/boards/action": return network.board_action(owner, body)
         if path == "/api/portfolios": return network.portfolio(owner, body)
         if path == "/api/my-research": return network.personal_action(owner, body)
+        if path == "/api/agent/organize": return self.server.service.organizer.queue(owner, str(body.get("boardId", "")))
+        if path == "/api/agent/policy": return self.server.service.organizer.policy(owner, str(body.get("boardId", "")), enabled=body.get("enabled"))
+        if path == "/api/agent/undo": return self.server.service.organizer.undo(owner, str(body.get("actionId", "")))
         if path == "/api/network/research":
             self.server.service.accounts.limit(owner, "research")
             return network.request_task(owner, body)
@@ -250,7 +254,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 self.json({"service": "trend-crawler", "ready": False, "error": "Research storage is temporarily unavailable"}, 503, cookie)
             return
-        if path in {"/api/boards", "/api/my-research", "/api/my-research/export", "/api/network-node", "/api/board-recommendations"}:
+        if path in {"/api/boards", "/api/my-research", "/api/my-research/export", "/api/network-node", "/api/board-recommendations", "/api/research-activity"}:
             try:
                 result = self.private_read(path, session)
                 self.json(result, status=202 if result.get("refreshing") else 200, cookie=cookie)
@@ -415,7 +419,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc: self.json({"error": str(exc)}, 400, cookie)
             except Exception: self.json({"error": "Account operation could not complete"}, 500, cookie)
             return
-        if path in {"/api/boards", "/api/boards/save", "/api/boards/action", "/api/portfolios", "/api/my-research", "/api/network/research"}:
+        if path in {"/api/boards", "/api/boards/save", "/api/boards/action", "/api/portfolios", "/api/my-research", "/api/network/research", "/api/agent/organize", "/api/agent/policy", "/api/agent/undo"}:
             try: self.json(self.private_post(path, body, session), cookie=cookie)
             except PermissionError as exc: self.json({"error": str(exc)}, 401, cookie)
             except BoardConflict as exc: self.json({"error": str(exc), "conflict": True}, 409, cookie)

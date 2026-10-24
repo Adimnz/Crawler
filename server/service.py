@@ -27,6 +27,8 @@ from .topics import TopicResearch
 from .research_network import ResearchNetwork
 from .accounts import AccountAuth
 from .recommendations import RecommendationEngine
+from .activity import ResearchActivity
+from .organizer import AgentOrganizer
 
 
 class ResearchService:
@@ -49,6 +51,8 @@ class ResearchService:
         self.network_research = ResearchNetwork(self)
         self.accounts = AccountAuth(self, directory)
         self.recommendations = RecommendationEngine(self)
+        self.activity = ResearchActivity(self)
+        self.organizer = AgentOrganizer(self)
         if seed:
             from .source_catalog import URL_REPAIRS
             registered_urls = {s["url"] for s in self.db.list("source")}
@@ -353,7 +357,7 @@ class ResearchService:
         latest={}
         for row in rows:
             if row['assetId'] not in latest or row['observedAt']>latest[row['assetId']]['observedAt']:latest[row['assetId']]=row
-        quotes=[{'assetId':aid,'symbol':assets[aid].get('ticker'),'name':assets[aid].get('name'),'type':'stock' if assets[aid]['assetClass']=='equity' else 'crypto','price':row['value'],'currency':_currency(row),'observedAt':row['observedAt'],'sourceId':row['sourceId'],'basis':row.get('metric')} for aid,row in latest.items()]
+        quotes=[{'assetId':aid,'symbol':assets[aid].get('ticker'),'name':assets[aid].get('name'),'type':'stock' if assets[aid]['assetClass']=='equity' else 'crypto','price':row['value'],'currency':_currency(row),'observedAt':row['observedAt'],'sourceId':row['sourceId'],'basis':row.get('metric'),'maxAgeMs':36*a.HOUR if row.get('frequency')=='daily' else max(120000,min(6*a.HOUR,2*sources[row['sourceId']].get('interval',300000)))} for aid,row in latest.items()]
         points=[]
         if selected in latest:
             current=latest[selected]
@@ -836,6 +840,23 @@ class ResearchService:
         return health
 
     def run_job(self, job):
+        self.activity.begin(job)
+        try:
+            result = self._execute_job(job)
+        except Exception as exc:
+            self.activity.finish(error=exc)
+            raise
+        else:
+            task = self.db.get("researchTask", job["payload"].get("taskId", "")) if job["kind"] == "network-research" else None
+            waiting = task.get("status") if task and task.get("status") != "Complete" else None
+            if job["kind"] == "topic-research":
+                topic = self.db.get("topicPortfolio", job["payload"]["topicId"]) or {}
+                if topic.get("deleted"): waiting = "Cancelled"
+                elif not topic.get("enabled", True) and not topic.get("manualAiRequest"): waiting = "Paused"
+            self.activity.finish(waiting=waiting)
+            return result
+
+    def _execute_job(self, job):
         payload = job["payload"]
         if job["kind"] == "poll":
             self.poll_source(payload["sourceId"])
@@ -860,9 +881,13 @@ class ResearchService:
         elif job["kind"] == "recommendation-review":
             if self.db.get("researchBoard", payload["boardId"]): self.recommendations.board(payload["ownerId"], payload["boardId"])
         elif job["kind"] == "network-index":
+            self.activity.report("Mapping cited entities and relationships", 0, 2)
             self.network_research.build(payload["topicId"], use_ai=payload.get("useAI", False))
+            self.activity.report("Source-backed graph saved; checking follow-up tasks", 1, 2)
         elif job["kind"] == "network-research":
             self.network_research.run_task(payload["taskId"])
+        elif job["kind"] == "agent-organize":
+            if self.db.get("researchBoard", payload["boardId"]): self.organizer.run(payload["ownerId"], payload["boardId"])
         else:
             raise ValueError("Unsupported job type")
 
@@ -877,10 +902,11 @@ class ResearchService:
 
     def worker(self, lane="all"):
         interactive = ("topic-research", "network-research", "network-index", "investigate")
+        analysis = ("recommendation-review", "research-cycle", "discover-assets", "coordinate-research", "agent-organize")
         while not self.stop_event.is_set():
             try:
-                job = self.db.claim_job(kinds=interactive if lane == "interactive" else None,
-                                        exclude_kinds=interactive if lane == "collection" else None)
+                job = self.db.claim_job(kinds=interactive if lane == "interactive" else analysis if lane == "analysis" else None,
+                                        exclude_kinds=interactive + analysis if lane == "collection" else analysis if lane == "all" else None)
             except Exception:
                 self.stop_event.wait(2)
                 continue
@@ -927,6 +953,7 @@ class ResearchService:
                     self.evaluate_monitors()
                     self.topics.refresh_due()
                     self.recommendations.queue_due(at)
+                    self.organizer.queue_due()
                     last_monitor = at
                 if at - last_analysis >= 300000:
                     for event in self.db.latest("event", 300):
@@ -954,6 +981,10 @@ class ResearchService:
             thread = threading.Thread(target=self.worker, args=(lane,), name="crawler-worker-" + str(index), daemon=True)
             thread.start()
             self.threads.append(thread)
+        # Expensive analysis cannot consume the only source-collection worker.
+        analysis = threading.Thread(target=self.worker, args=("analysis",), name="crawler-analysis", daemon=True)
+        analysis.start()
+        self.threads.append(analysis)
         scheduler = threading.Thread(target=self.scheduler, name="crawler-scheduler", daemon=True)
         scheduler.start()
         self.threads.append(scheduler)

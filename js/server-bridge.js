@@ -125,10 +125,11 @@
       if (name==='market') {
         const rows=result.value.quotes || [],counts=new Map();
         for(const row of rows)counts.set(row.type+':'+row.symbol,(counts.get(row.type+':'+row.symbol)||0)+1);
-        const activeIds=new Set(rows.map(row=>row.assetId));
+        const eligible=rows.filter(row=>row.symbol && row.currency==='USD' && counts.get(row.type+':'+row.symbol)===1);
+        const activeIds=new Set(eligible.map(row=>row.assetId));
         for(const map of [live,quotes])for(const [symbol,quote] of map)if(!quote.assetId || !activeIds.has(quote.assetId))map.delete(symbol);
-        for(const row of rows)if(row.symbol && row.currency==='USD' && counts.get(row.type+':'+row.symbol)===1) {
-          const quote={price:row.price,chg:null,vol:null,t:row.observedAt,marketAt:row.observedAt,assetId:row.assetId};
+        for(const row of eligible) {
+          const quote={price:row.price,chg:null,vol:null,t:row.observedAt,marketAt:row.observedAt,assetId:row.assetId,name:row.name,maxAgeMs:row.maxAgeMs};
           if(row.type==='crypto')live.set(row.symbol,quote);else quotes.set(row.symbol,quote);
         }
       }

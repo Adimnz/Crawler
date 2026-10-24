@@ -53,7 +53,7 @@ def _estimate(training, features):
             'samples': len(values), 'sampleIds': [row['id'] for row in nearest]}
 
 
-def evaluate_prices(observations, at, round_trip_bps=None):
+def evaluate_prices(observations, at, round_trip_bps=None, checkpoint=None):
     """No random splits, synthetic sessions, optimized thresholds or LLM numbers."""
     prepared, exclusions = _prepare(observations, at)
     history, error = _prices(prepared, at)
@@ -100,6 +100,7 @@ def evaluate_prices(observations, at, round_trip_bps=None):
     samples = []
     # Striding horizon+1 prevents adjacent decision/entry/exit windows overlapping.
     for i in range(lookback, n - horizon - 1, horizon + 1):
+        if checkpoint: checkpoint()
         window = history[i-lookback:i+1]
         if not all(_daily_gap(left, right) for left, right in zip(window, window[1:])): continue
         decision = max(row['_available'] for row in window)
@@ -119,6 +120,7 @@ def evaluate_prices(observations, at, round_trip_bps=None):
     result['excludedAvailabilityOrGaps'] = max(0, len(range(lookback, n-horizon-1, horizon+1)) - len(samples))
     validation = []
     for sample in samples:
+        if checkpoint: checkpoint()
         training = [r for r in samples if r['exitAt'] < sample['decisionAt'] and r['outcomeAvailableAt'] < sample['decisionAt']]
         if len(training) < POLICY['minimumTrainingSamples']: continue
         forecast = _estimate(training, sample['features'])
@@ -191,7 +193,8 @@ class RecommendationEngine:
         if fresh:
             if full: return self.db.get('recommendationSnapshot',board_id)
             return view
-        self._queue(owner,board_id)
+        job_id = self._queue(owner,board_id)
+        progress = self.db.get('taskProgress',job_id) or {'id':job_id,'status':'Queued','percent':0,'stage':'Waiting for an analysis worker'}
         if view:
             result = copy.deepcopy(view)
             for item in result['assets']:
@@ -200,7 +203,7 @@ class RecommendationEngine:
             result['eligibleCount']=0
         else:
             result = {'boardId':board_id,'assets':[],'eligibleCount':0}
-        return {**result,'status':'Updating','refreshing':True,'retryAfterMs':10000,'message':'Recommendation research is running in the background. The research server is connected.'}
+        return {**result,'status':'Updating','refreshing':True,'progress':progress,'retryAfterMs':10000,'message':'Recommendation research is running in the background. The research server is connected.'}
 
     def _publish_view(self, result, signature, expiry):
         # Strip large replay arrays before copying, rather than duplicating them in RAM.
@@ -262,6 +265,7 @@ class RecommendationEngine:
         docs, considered, relevance = {}, 0, defaultdict(list)
         contexts = [{**t,'_subjectNames':self.s.topics._subject_names(t)} for t in topics]
         for doc in self.db.scan('document'):
+            if considered % 32 == 0: self.s.activity.check()
             considered += 1
             matching = [t for t in contexts if self.s.topics._match(doc,t)['matches']]
             if doc['id'] not in explicit and not matching: continue
@@ -290,6 +294,7 @@ class RecommendationEngine:
 
     def board(self, owner, board_id):
         # Authorization is checked on every cache hit as well as every computation.
+        self.s.activity.report("Loading the observation board", 0, 6)
         detail = self.s.network_research.board(owner, board_id)
         at = now_ms()
         signature = (tuple(self.db.kind_revisions.get(k, 0) for k in DEPENDENCIES),
@@ -312,6 +317,7 @@ class RecommendationEngine:
                 result['status'] = 'Review required'
                 result['eligibleCount'] = 0
             result['inputSignature'] = a.digest(dumps(signature))
+            self.s.activity.report('Saving the assessed recommendation and evidence', 5, 6)
             previous = self.db.get('recommendationSnapshot', board_id)
             material = a.digest(dumps({'assets':[{k:v for k,v in r.items() if k not in {'analysis'}} for r in result['assets']], 'sourceManifest':result['sourceManifest'], 'settings':result['settings'], 'modelVersion':MODEL_VERSION}))
             if not previous or previous.get('materialFingerprint') != material:
@@ -344,11 +350,14 @@ class RecommendationEngine:
         return changes or ['Evidence, validation, costs or freshness changed; assessment recalculated.']
 
     def _build(self, detail, at):
+        self.s.activity.report('Screening collected topic and branch evidence', 1, 6)
         topics, assets, sources, docs, claims, relevance, considered = self._context(detail)
+        self.s.activity.report('Collecting comparable historical measurements', 2, 6, detail=f'{considered} records screened; {len(docs)} relevant')
         candidate_ids = set(relevance)
         price_rows, counts, context_rows = defaultdict(list), defaultdict(int), defaultdict(dict)
         for kind in ('observation','observationVintage'):
-            for row in self.db.scan(kind):
+            for index, row in enumerate(self.db.scan(kind)):
+                if index % 128 == 0: self.s.activity.check()
                 if row.get('assetId') in candidate_ids:
                     counts[row['assetId']] += 1
                     if row.get('metric') in PRICE_METRICS: price_rows[row['assetId']].append(row)
@@ -365,7 +374,9 @@ class RecommendationEngine:
                   'sourceManifest':[{'id':d['id'],'version':d['version'],'sourceId':d['sourceId'],'url':d.get('url'),'title':d.get('title')} for d in docs.values()],
                   'method': 'Cited topic relevance selects provider-identified assets. Source contradictions veto entries. Historical price analogues estimate conditional returns only after chronological validation.',
                   'limitations':['The algorithm cannot know all existing information. Coverage is the collected records listed here.', 'Text co-mentions and correlations do not establish a financial exposure or cause a return.']}
-        for asset_id in sorted(candidate_ids):
+        for index, asset_id in enumerate(sorted(candidate_ids)):
+            self.s.activity.report('Validating historical signals for '+str(assets[asset_id].get('name',asset_id)), 3+index/max(1,len(candidate_ids)), 6,
+                                   completed_items=index, total_items=len(candidate_ids))
             asset = assets[asset_id]
             refs = {dumps(r):r for r in relevance[asset_id]}.values()
             valid_refs, evidence_gaps = [], []
@@ -393,7 +404,7 @@ class RecommendationEngine:
             if not topics or not topics[0].get('enabled',True) or detail['board'].get('expansionState')!='running' or detail['board'].get('archived'):
                 evidence_gaps.append('Research is stopped or paused; no active entry recommendation is issued.')
             enabled_prices = [r for r in price_rows[asset_id] if (sources.get(r.get('sourceId')) or {}).get('enabled') and (sources.get(r.get('sourceId')) or {}).get('tier')=='primary']
-            model = evaluate_prices(enabled_prices, at, self.settings()['roundTripCostBps'])
+            model = evaluate_prices(enabled_prices, at, self.settings()['roundTripCostBps'], checkpoint=self.s.activity.check)
             blockers = list(dict.fromkeys(evidence_gaps + model['blockers']))
             price = model.get('latestQuote') or model.get('latestPrice')
             daily_price = model.get('latestPrice')

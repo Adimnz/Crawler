@@ -253,6 +253,7 @@ class ResearchNetwork:
                     self.db.put("researchPortfolio", portfolio["id"], portfolio)
             if board["topicId"] == topic_id or topic_id in board.get("branchTopics", []):
                 self._automatic_branches(board, value)
+                self.s.organizer.queue(board["ownerId"], board["id"])
         return value
 
     def _automatic_branches(self, board, graph):
@@ -443,18 +444,26 @@ class ResearchNetwork:
                 self.db.delete("recommendationRevision", board_id + ":" + str(row["revision"]))
         for portfolio in self.db.latest("researchPortfolio", 10000):
             if portfolio["ownerId"] != owner: continue
+            if portfolio.get("boardId") == board_id and portfolio.get("createdBy") == "research-agent":
+                self.db.delete("researchPortfolio", portfolio["id"])
+                continue
             kept = [item for item in portfolio.get("items", []) if item.get("boardId") != board_id]
             if len(kept) != len(portfolio.get("items", [])):
                 portfolio.update(items=kept, updatedAt=now_ms())
                 self.db.put("researchPortfolio", portfolio["id"], portfolio)
-        for kind in ("boardRevision", "researchTask", "researchNotification"):
-            for row in self.db.latest(kind, 20000):
+        for kind in ("boardRevision", "researchTask", "researchNotification", "taskProgress", "researchWatchlist", "researchMonitor", "researchTag", "agentAction", "agentPolicy", "agentOrganizationJob"):
+            for row in self.db.scan(kind):
                 if row.get("ownerId") == owner and (row.get("boardId") == board_id or kind == "boardRevision" and row["id"] == board_id):
                     key = row["id"] + ":v" + str(row["version"]) if kind == "boardRevision" else row["id"]
                     self.db.delete(kind, key)
 
     def portfolio(self, owner, values):
         item = self._owned("researchPortfolio", values["id"], owner) if values.get("id") else {"id": identifier("portfolio"), "ownerId": owner, "title": "Watch portfolio", "description": "", "folder": "", "items": [], "createdAt": now_ms()}
+        if item.get("createdBy") == "research-agent":
+            from .organizer import stable
+            key = stable(owner, "researchPortfolio", item["id"])
+            self.db.put("agentSuppression", key, {"id": key, "ownerId": owner})
+            item["agentManaged"] = False
         if values.get("delete"):
             self.db.delete("researchPortfolio", item["id"])
             return {"deleted": True}
@@ -475,7 +484,7 @@ class ResearchNetwork:
         return self.db.put("researchPortfolio", item["id"], item)
 
     def personal(self, owner):
-        return {"boards": self.list_boards(owner), "portfolios": [row for row in self.db.latest("researchPortfolio", 10000) if row["ownerId"] == owner],
+        return {**self.s.organizer.personal(owner), "boards": self.list_boards(owner), "portfolios": [row for row in self.db.latest("researchPortfolio", 10000) if row["ownerId"] == owner],
                 "notifications": [row for row in self.db.latest("researchNotification", 10000) if row["ownerId"] == owner][:200],
                 "preferences": self.db.get("researchPreferences", owner) or {"notifications": True}}
 
@@ -519,13 +528,14 @@ class ResearchNetwork:
 
     def export_personal(self, owner):
         data = self.personal(owner)
+        data.update(self.s.organizer.personal(owner, full=True))
         data.update(schema="research-network/private-1", exportedAt=now_ms(), boards=[self.board(owner, row["id"]) for row in data["boards"]])
         return data
 
     def delete_personal(self, owner):
         for board in self.list_boards(owner): self.delete_board(owner, board["id"])
-        for kind in ("researchPortfolio", "researchNotification", "researchTask", "researchPreferences", "accountTopic"):
-            for row in self.db.latest(kind, 20000):
+        for kind in ("researchPortfolio", "researchNotification", "researchTask", "researchPreferences", "accountTopic", "researchWatchlist", "researchMonitor", "researchTag", "agentAction", "agentPolicy", "agentOrganizationJob", "agentSuppression", "taskProgress"):
+            for row in self.db.scan(kind):
                 if row.get("ownerId") == owner: self.db.delete(kind, row["id"])
 
     def request_task(self, owner, values):

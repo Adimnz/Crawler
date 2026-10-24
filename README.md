@@ -330,3 +330,56 @@ RAM and repeated model work while retaining full persisted evidence.
 
 After updating a running installation, restart the Python server once and hard
 refresh existing browser tabs so they load the matching JavaScript.
+
+
+## Observation portal activity and agent organization
+
+The observation board now has a research activity dialogue on its right, above
+the evidence inspector. It reports actual source checks, evidence mapping,
+recommendation assessment, and organization steps. Percentages count completed
+planned stages (and assessed assets within a stage); they are neither time
+estimates nor investment confidence. A task reaches 100% only after its job
+returns successfully. Waiting branches, failed attempts, and retries retain their
+real status. The separate recommendation bar updates while its durable job runs.
+Only execution summaries are displayed; private model reasoning is not exposed.
+
+Each board can organize its research automatically or through **Organize
+research** in the activity dialogue. Agents create private article reading lists,
+source-change monitors, source-version article tags, and stock/crypto watch
+portfolios with favorite research interests. Relevance comes from current topic
+citations or full instrument names/issuer identities in collected text, including
+instruments in the owner's existing watch portfolios. Ticker-only matches and
+unverified instruments do not qualify. These collections are research interests;
+no positions, trade orders or new return predictions are invented.
+
+The Watchlist page shows agent reading lists, monitors and the latest 50 actions.
+Each mutation records its reason, source versions and a hash-chain audit reference.
+**Undo** restores the previous record only if nothing has changed since that
+action, and suppresses automatic recreation of that target. User edits to agent
+portfolios take management over from the agent. **Pause organization** stops new
+automatic organization for that board. Changed or disabled source support removes
+current tags and asset favorites on the next reassessment. Source changes during
+a scan withhold publication until a later pass. Monitors create private in-app
+notifications when their source versions change. No external messages are sent.
+
+Article lists and tags retain up to 200 recent matching articles per board; the
+matching count remains visible. Normal personal reads are bounded, while explicit
+private research export includes the full stored agent action history and inactive
+tags. Private endpoints verify board/record ownership and existing CSRF checks.
+Deleting private research removes its agent collections and activity records.
+
+Priority Signals adds a category briefing, evidence summaries and clearer research
+triage. The Mark uses stock and crypto tables with original observation times and
+source-appropriate freshness windows. Missing percentage changes remain missing.
+Newsstand promotes recent primary/major/wire reporting and source-headline-labeled
+breaking stories; article tags also appear in All Activity.
+
+The Python server reserves an additional analysis worker for recommendations and
+organization so they cannot take the only collection worker. Archive/model loops
+yield cooperatively, and `CRAWLER_JOB_BUDGET_SECONDS` (default 900, range 60–3600)
+bounds cooperative work before a retry. Existing provider timeouts still bound
+network calls; this is not forced termination of blocked native code. New scoped
+indexes keep activity and personal collection reads independent of unrelated
+evidence volume. Unchanged organization inputs skip repeated archive scans.
+
+After pulling the update, restart the Python server and hard-refresh the browser.

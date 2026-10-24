@@ -312,6 +312,8 @@ class TopicResearch:
         checked, warnings = [], []
         for source in enabled[:2]:
             if source.get("nextPollAt", 0) > now_ms(): continue
+            self.s.activity.report("Checking original source: " + source["name"], 1, 7,
+                                   completed_items=len(checked), total_items=min(2, len(enabled)))
             try:
                 self.s.poll_source(source["id"])
                 checked.append({"id": source["id"], "name": source["name"], "status": "Collected"})
@@ -613,12 +615,15 @@ class TopicResearch:
         started = now_ms()
         self._update(topic_id, state="Researching", status="Researching", progress="Interpreting your topic and checking sources", researchStartedAt=started)
         try:
+            self.s.activity.report("Interpreting the topic and planning source checks", 0, 7)
             item = self._plan(item, use_ai=use_ai)
+            self.s.activity.report("Checking configured original sources", 1, 7)
             current = self._read(topic_id)
             if not current.get("enabled", True) and not (request_token and (current.get("manualAiRequest") or {}).get("token") == request_token): return current
             matched = self._matching_documents(item)
             checked, warnings = self._refresh_sources(item, matched)
             self._update(topic_id, progress="Researching original sources and identifying relevant instruments")
+            self.s.activity.report("Discovering original sources and instruments", 2, 7)
             item = self._web_discovery(self._read(topic_id), use_ai=use_ai, manual=bool(request_token))
             current = self._read(topic_id)
             if not current.get("enabled", True) and not (request_token and (current.get("manualAiRequest") or {}).get("token") == request_token): return current
@@ -628,10 +633,12 @@ class TopicResearch:
                 pending = []
                 warnings.append("Official instrument discovery was unavailable; no unverified identities were admitted.")
             self._update(topic_id, progress="Explaining the topic and identifying companies, markets, and institutions to watch")
+            self.s.activity.report("Preparing the cited research summary", 3, 7, detail=f"{len(matched)} matching source records")
             research_changes = self._market_report(item, matched, use_ai, manual=bool(request_token))
             item = {**item, **research_changes}
             current = self._read(topic_id)
             if current.get("deleted") or not current.get("enabled", True) and not current.get("manualAiRequest"): return current
+            self.s.activity.report("Assessing related financial evidence", 4, 7)
             cycle_started = now_ms()
             self.s.investments.cycle("Topic research: " + item["query"][:160])
             # Filings may have been collected concurrently while provider work was queued.
@@ -647,6 +654,7 @@ class TopicResearch:
                 item.update(research_changes)
                 matched = self._matching_documents(item)
                 entries, candidates = self._curate(item, matched)
+            self.s.activity.report("Verifying source versions before publication", 5, 7)
             safe_entries = []
             for entry in entries:
                 changed = any(not (self.db.get("document", ref["documentId"]) or {}).get("version") == ref["version"] for ref in entry.get("topicMatch", []))
@@ -711,6 +719,7 @@ class TopicResearch:
             if material:
                 self.db.put("topicRevision", topic_id + ":v" + str(version), result)
                 self.db.audit("Topic watch portfolio revised", topic_id, {"version": version, "qualified": len(entries), "candidates": len(candidates)})
+            self.s.activity.report("Publishing research and scheduling follow-ups", 6, 7, detail=f"{len(evidence)} cited records; {len(entries)} qualified monitoring entries")
             self.s.network_research.topic_completed(result, use_ai=use_ai and not result.get("marketResearchStale"))
             return result
         except Exception:

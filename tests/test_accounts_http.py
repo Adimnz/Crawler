@@ -73,9 +73,15 @@ class AccountHTTPTests(unittest.TestCase):
         status, board, _ = self.request(alice, "boards", {"topicId": topic["id"]})
         self.assertEqual(status, 200)
         board_id = board["board"]["id"]
-        for path in ("boards?id=" + board_id, "board-recommendations?boardId="+board_id, "topics?id=" + topic["id"], "network-node?boardId=" + board_id + "&id=" + board["graph"]["rootId"]):
+        for path in ("boards?id=" + board_id, "research-activity?boardId="+board_id, "board-recommendations?boardId="+board_id, "topics?id=" + topic["id"], "network-node?boardId=" + board_id + "&id=" + board["graph"]["rootId"]):
             self.assertEqual(self.request(bob, path)[0], 400)
         self.assertEqual(self.request(alice,"board-recommendations?boardId="+board_id)[0],202)
+        self.assertEqual(self.request(alice,"research-activity?boardId="+board_id)[0],200)
+        self.assertEqual(self.request(bob,"agent/organize",{"boardId":board_id})[0],400)
+        self.assertEqual(self.request(alice,"agent/organize",{"boardId":board_id})[0],200)
+        self.assertEqual(self.request(bob,"agent/policy",{"boardId":board_id,"enabled":False})[0],400)
+        self.assertEqual(self.request(alice,"agent/policy",{"boardId":board_id,"enabled":False})[0],200)
+        self.assertEqual(self.request(alice,"agent/organize",{"boardId":board_id},csrf=False)[0],403)
         self.assertEqual(self.request(alice,"recommendations/settings",{"roundTripCostBps":0})[0],401)
         self.assertEqual(self.request(bob, "boards", {"topicId": topic["id"]})[0], 400)
         self.assertEqual(self.request(bob, "boards/save", {"id": board_id, "baseVersion": 1, "title": "Other account"})[0], 400)

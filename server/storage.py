@@ -67,6 +67,14 @@ class Database:
             metric = "(payload::jsonb->>'metric')" if self.postgres else "json_extract(payload,'$.metric')"
             asset = "(payload::jsonb->>'assetId')" if self.postgres else "json_extract(payload,'$.assetId')"
             self.execute(conn,f"CREATE INDEX IF NOT EXISTS records_market_prices ON records({metric},{asset},updated_at DESC) WHERE kind='observation'")
+            for kind, fields in (("taskProgress", ("boardId", "topicId")), ("researchTask", ("boardId",)),
+                                 *[(kind, ("ownerId",)) for kind in ("agentAction", "researchPortfolio", "researchWatchlist", "researchMonitor", "researchTag")]):
+                for field in fields:
+                    expression = f"(payload::jsonb->>'{field}')" if self.postgres else f"json_extract(payload,'$.{field}')"
+                    self.execute(conn, f"CREATE INDEX IF NOT EXISTS records_{kind}_{field} ON records({expression},updated_at DESC) WHERE kind='{kind}'")
+            for field in ("boardId", "topicId", "taskId"):
+                expression = f"(payload::jsonb->>'{field}')" if self.postgres else f"json_extract(payload,'$.{field}')"
+                self.execute(conn, f"CREATE INDEX IF NOT EXISTS jobs_{field} ON jobs({expression},updated_at DESC) WHERE state IN ('queued','running')")
 
     @contextlib.contextmanager
     def connection(self):
@@ -121,6 +129,33 @@ class Database:
             if not rows: return
             for row in rows: yield json.loads(row["payload"])
             cursor = rows[-1]["id"]
+
+    def matching(self, kind, field, value, limit=200):
+        if field not in {"boardId", "topicId", "ownerId"}: raise ValueError("Unsupported record filter")
+        expression = f"(payload::jsonb->>'{field}')" if self.postgres else f"json_extract(payload,'$.{field}')"
+        with self.connection() as conn:
+            rows = self.execute(conn, f"SELECT payload FROM records WHERE kind=? AND {expression}=? ORDER BY updated_at DESC,id LIMIT ?", (kind, value, limit)).fetchall()
+            return [json.loads(row["payload"]) for row in rows]
+
+    def activity_records(self, board_id, topic_ids, limit=40):
+        board = "(payload::jsonb->>'boardId')" if self.postgres else "json_extract(payload,'$.boardId')"
+        topic = "(payload::jsonb->>'topicId')" if self.postgres else "json_extract(payload,'$.topicId')"
+        placeholders = ",".join("?" for _ in topic_ids)
+        with self.connection() as conn:
+            rows = self.execute(conn, f"SELECT payload FROM records WHERE kind='taskProgress' AND ({board}=? OR {topic} IN ({placeholders})) ORDER BY updated_at DESC,id LIMIT ?", (board_id, *topic_ids, limit)).fetchall()
+            return [json.loads(row["payload"]) for row in rows]
+
+    def activity_jobs(self, board_id, topic_ids, task_ids):
+        expressions = [("boardId", [board_id]), ("topicId", topic_ids), ("taskId", task_ids)]
+        clauses, args = [], []
+        for field, values in expressions:
+            if not values: continue
+            expression = f"(payload::jsonb->>'{field}')" if self.postgres else f"json_extract(payload,'$.{field}')"
+            clauses.append(expression + " IN (" + ",".join("?" for _ in values) + ")")
+            args.extend(values)
+        with self.connection() as conn:
+            rows = self.execute(conn, "SELECT * FROM jobs WHERE state IN ('queued','running') AND (" + " OR ".join(clauses) + ") ORDER BY updated_at DESC LIMIT 40", args).fetchall()
+            return [{**dict(row), "payload": json.loads(row["payload"])} for row in rows]
 
     def market_observations(self, asset_id=None, limit=2000):
         metric = "(payload::jsonb->>'metric')" if self.postgres else "json_extract(payload,'$.metric')"
