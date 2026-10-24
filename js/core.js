@@ -11,6 +11,7 @@ const PROXIES = [
   u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
 ];
 const routeFor = {};
+const browserCollectionAllowed = () => (window.CrawlerServer?.mode || (/^https?:$/.test(location.protocol) ? 'connecting' : 'browser')) === 'browser';
 let activeReqs = 0; const waitingReqs = [];
 const acquire = () => activeReqs < 8 ? (activeReqs++, Promise.resolve()) : new Promise(r => waitingReqs.push(r));
 const release = () => { const n = waitingReqs.shift(); if (n) n(); else activeReqs--; };
@@ -25,6 +26,7 @@ async function timed(url, ms = 6000) {
 }
 const hostDown = {};
 async function fetchAny(url, parse) {
+  if(!browserCollectionAllowed())throw new Error('This source is managed by the research server; direct browser collection is paused.');
   const host = new URL(url).host, start = routeFor[host] ?? 0;
   if (hostDown[host] > Date.now()) throw new Error('cooling down');
   let err;
@@ -64,11 +66,12 @@ function job(name, fn, ms, delay = 0) {
     // Do not silently fall back to browser collectors when the Python server stops.
     if (window.CrawlerServer?.offline) return setTimeout(run, 60000);
     if (document.hidden) return setTimeout(run, 5000);
-    if (window.CrawlerServer?.connected && !['Prediction markets'].includes(name)) return setTimeout(run, Math.max(ms, 15000));
+    if (!browserCollectionAllowed()) return setTimeout(run, 5000);
     try { await fn(); fails = 0; setStatus(name, true); } catch (e) { fails++; setStatus(name, false, e.message); }
     setTimeout(run, fails ? ms * Math.min(8, 2 ** fails) : ms);
   };
   setTimeout(run, delay + Math.random() * 1500);
 }
+
 
 

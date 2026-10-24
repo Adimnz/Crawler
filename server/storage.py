@@ -64,6 +64,9 @@ class Database:
             for statement in SCHEMA.split(";"):
                 if statement.strip():
                     self.execute(conn, statement)
+            metric = "(payload::jsonb->>'metric')" if self.postgres else "json_extract(payload,'$.metric')"
+            asset = "(payload::jsonb->>'assetId')" if self.postgres else "json_extract(payload,'$.assetId')"
+            self.execute(conn,f"CREATE INDEX IF NOT EXISTS records_market_prices ON records({metric},{asset},updated_at DESC) WHERE kind='observation'")
 
     @contextlib.contextmanager
     def connection(self):
@@ -99,6 +102,12 @@ class Database:
     def put(self, kind, record_id, payload, at=None):
         at = at or now_ms()
         with self.lock, self.connection() as conn:
+            if kind == "source":
+                prior = self.execute(conn,"SELECT payload FROM records WHERE kind=? AND id=?",(kind,record_id)).fetchone()
+                old = json.loads(prior["payload"]) if prior else {}
+                fields = ("enabled","tier","kind","url","config","family","permissions","allowFullText")
+                if not prior or any(old.get(k) != payload.get(k) for k in fields):
+                    self.kind_revisions["sourceConfiguration"] = self.kind_revisions.get("sourceConfiguration",0)+1
             self.execute(conn, "INSERT INTO records(kind,id,payload,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at", (kind, record_id, dumps(payload), at, at))
             self.kind_revisions[kind] = self.kind_revisions.get(kind, 0) + 1
         return payload
@@ -113,6 +122,14 @@ class Database:
             for row in rows: yield json.loads(row["payload"])
             cursor = rows[-1]["id"]
 
+    def market_observations(self, asset_id=None, limit=2000):
+        metric = "(payload::jsonb->>'metric')" if self.postgres else "json_extract(payload,'$.metric')"
+        asset = "(payload::jsonb->>'assetId')" if self.postgres else "json_extract(payload,'$.assetId')"
+        clause, args = (f" AND {asset}=?", [asset_id]) if asset_id else ("", [])
+        with self.connection() as conn:
+            rows=self.execute(conn,f"SELECT payload FROM records WHERE kind='observation' AND {metric} IN ('price','price_usd','close','adjusted_close')"+clause+" ORDER BY updated_at DESC,id LIMIT ?",(*args,limit)).fetchall()
+            return [json.loads(r['payload']) for r in rows]
+
     def list(self, kind, limit=5000, after=0):
         with self.connection() as conn:
             rows = self.execute(conn, "SELECT payload FROM records WHERE kind=? AND updated_at>=? ORDER BY updated_at,id LIMIT ?", (kind, after, limit)).fetchall()
@@ -122,6 +139,7 @@ class Database:
         with self.lock, self.connection() as conn:
             self.execute(conn, "DELETE FROM records WHERE kind=? AND id=?", (kind, record_id))
             self.kind_revisions[kind] = self.kind_revisions.get(kind, 0) + 1
+            if kind == "source": self.kind_revisions["sourceConfiguration"] = self.kind_revisions.get("sourceConfiguration",0)+1
 
     def count(self, kind):
         with self.connection() as conn:
@@ -292,4 +310,5 @@ class ObjectStore:
         if self.client:
             return self.client.get_object(Bucket=self.bucket, Key="raw/" + key)["Body"].read()
         return (self.root / key).read_bytes()
+
 

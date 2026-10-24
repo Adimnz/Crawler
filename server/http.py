@@ -34,13 +34,21 @@ class AppServer(ThreadingHTTPServer):
 
     def process_request(self, request, client_address):
         # ThreadingHTTPServer otherwise creates an unbounded thread per connection.
-        if not self.http_slots.acquire(blocking=False):
+        recovery = False
+        pool = self.http_slots
+        if not pool.acquire(blocking=False):
+            pool = self.recovery_slots
+            recovery = True
+        else:
+            pool = None
+        if pool is not None and not pool.acquire(blocking=False):
             try:
                 request.settimeout(0.5)
-                payload = b'{"error":"Research server is busy. Retry shortly."}'
+                payload = b'{"error":"Research server is busy. Retry shortly.","code":"SERVER_BUSY","retryAfterMs":3000}'
                 response = (b"HTTP/1.1 503 Service Unavailable\r\n"
                             b"Content-Type: application/json\r\n"
                             b"Cache-Control: no-store\r\n"
+                            b"Retry-After: 3\r\n"
                             b"Connection: close\r\n"
                             + b"Content-Length: " + str(len(payload)).encode() + b"\r\n\r\n" + payload)
                 request.sendall(response)
@@ -49,17 +57,30 @@ class AppServer(ThreadingHTTPServer):
             finally:
                 self.shutdown_request(request)
             return
+        with self.http_lane_lock:
+            self.http_lanes[request] = (self.recovery_slots if recovery else self.http_slots, recovery)
+        request.settimeout(10)
         try:
             super().process_request(request, client_address)
         except BaseException:
-            self.http_slots.release()
+            with self.http_lane_lock: lane = self.http_lanes.pop(request)
+            lane[0].release()
             raise
 
     def process_request_thread(self, request, client_address):
         try:
             super().process_request_thread(request, client_address)
         finally:
-            self.http_slots.release()
+            with self.http_lane_lock: lane = self.http_lanes.pop(request, None)
+            if lane: lane[0].release()
+
+    def finish_request(self, request, client_address):
+        with self.http_lane_lock: recovery = self.http_lanes[request][1]
+        (RecoveryHandler if recovery else Handler)(request, client_address, self)
+
+    def http_load(self):
+        with self.http_lane_lock:
+            return {"active": len(self.http_lanes), "normalLimit": self.http_limit, "recoveryLimit": 2}
 
     def __init__(self, address, service, root, auth_token=None):
         self.service = service
@@ -71,7 +92,10 @@ class AppServer(ThreadingHTTPServer):
         self.allowed_hosts = {"127.0.0.1", "localhost", "::1", bind_host, *filter(None, os.getenv("CRAWLER_ALLOWED_HOSTS", "").split(","))}
         self.sessions, self.session_lock = {}, threading.Lock()
         self.stopping = threading.Event()
-        self.http_slots = threading.BoundedSemaphore(max(2, min(32, int(os.getenv("CRAWLER_HTTP_CONNECTIONS", "8")))))
+        self.http_limit = max(2, min(32, int(os.getenv("CRAWLER_HTTP_CONNECTIONS", "8"))))
+        self.http_slots = threading.BoundedSemaphore(self.http_limit)
+        self.recovery_slots = threading.BoundedSemaphore(2)
+        self.http_lanes, self.http_lane_lock = {}, threading.Lock()
         super().__init__(address, Handler)
 
     def initiate_shutdown(self):
@@ -176,7 +200,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/my-research": return service.network_research.personal(owner)
         if path == "/api/my-research/export": return service.network_research.export_personal(owner)
         if path == "/api/network-node": return service.network_research.inspect(owner, value("boardId"), value("id"))
-        if path == "/api/board-recommendations": return service.recommendations.board(owner, value("boardId"))
+        if path == "/api/board-recommendations": return service.recommendations.view(owner, value("boardId"), full=value("full")=="1")
         raise ValueError("Unknown private research route")
 
     def private_post(self, path, body, session):
@@ -215,7 +239,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/ready":
             service = self.server.service
             stopping = self.server.stopping.is_set()
-            self.json({"service": "trend-crawler", "ready": not stopping, "status": "stopping" if stopping else "running", "ai": {"configured": service.ai.ready, "model": service.ai.model or None, "automaticAnalysis": service.auto_ai}}, status=503 if stopping else 200, cookie=cookie)
+            self.json({"service": "trend-crawler", "ready": not stopping, "http": self.server.http_load(), "status": "stopping" if stopping else "running", "ai": {"configured": service.ai.ready, "model": service.ai.model or None, "automaticAnalysis": service.auto_ai}}, status=503 if stopping else 200, cookie=cookie)
             return
         if self.server.stopping.is_set():
             self.json({"error": "Research server is shutting down", "status": "stopping"}, 503, cookie)
@@ -227,13 +251,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.json({"service": "trend-crawler", "ready": False, "error": "Research storage is temporarily unavailable"}, 503, cookie)
             return
         if path in {"/api/boards", "/api/my-research", "/api/my-research/export", "/api/network-node", "/api/board-recommendations"}:
-            try: self.json(self.private_read(path, session), cookie=cookie)
+            try:
+                result = self.private_read(path, session)
+                self.json(result, status=202 if result.get("refreshing") else 200, cookie=cookie)
             except PermissionError as exc: self.json({"error": str(exc)}, 401, cookie)
             except (ValueError, KeyError) as exc: self.json({"error": str(exc)}, 400, cookie)
             except Exception: self.json({"error": "Private research could not be loaded"}, 500, cookie)
             return
         account = self.account_session()
-        public_reads = {"/api/source-items", "/api/sources", "/api/documents", "/api/events", "/api/investment", "/api/topics", "/api/ai/settings", "/api/asset-profile", "/api/cross-market-report", "/api/observations", "/api/asset-assessments", "/api/dossier", "/api/graph", "/api/document-versions", "/api/event-study"}
+        public_reads = {"/api/source-items", "/api/sources", "/api/documents", "/api/events", "/api/investment", "/api/topics", "/api/ai/settings", "/api/asset-profile", "/api/cross-market-report", "/api/observations", "/api/market-data", "/api/asset-assessments", "/api/dossier", "/api/graph", "/api/document-versions", "/api/event-study"}
         account_allowed = bool(account and not self.server.service.accounts.public(account)["needsMfa"] and path in public_reads)
         if not self.is_owner(session) and not account_allowed:
             self.json({"error": "Owner sign-in is required"}, 401, cookie)
@@ -270,6 +296,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = service.investments.profile(value("id"), int(value("at")) if value("at") else None)
             elif path == "/api/cross-market-report":
                 result = service.investments.report(value("id"), int(value("at")) if value("at") else None)
+            elif path == "/api/market-data":
+                result = service.market_data(value("symbol"),value("type"))
             elif path == "/api/observations":
                 result = {"observations": service.investments._observations(value("assetId") or None, int(value("at")) if value("at") else None)}
             elif path == "/api/asset-assessments":
@@ -555,3 +583,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
 
+
+
+
+class RecoveryHandler(Handler):
+    """Two reserved handlers serve health and static assets, never heavy API work."""
+    def busy(self):
+        self.json({"error":"Research server is busy. Retry shortly.", "code":"SERVER_BUSY", "retryAfterMs":3000},503)
+    def do_GET(self):
+        path = urlsplit(self.path).path
+        if path == "/api/ready" or not path.startswith("/api/"):
+            return super().do_GET()
+        self.busy()
+    def do_POST(self):
+        self.busy()
