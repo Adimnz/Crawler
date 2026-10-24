@@ -282,14 +282,16 @@ class TopicResearch:
     def _match(self, document, item):
         text = document.get("title", "") + " " + document.get("text", "")
         terms = _terms(item["query"])
-        matched = [term for term in terms if _contains(text, term)]
+        normalized = " " + _normal(text) + " "
+        contains = lambda term: " " + _normal(term) + " " in normalized
+        matched = [term for term in terms if contains(term)]
         needed = max(1, math.ceil(len(terms) * .6))
         literal = len(matched) >= needed
         # Literal parsing cannot bypass the original multi-term threshold. AI
         # expansions are discovery candidates only, and must add actual scope.
         hints = [term for term in item.get("plan", {}).get("searchTerms", [])
-                 if item.get("planMethod") == "AI research plan" and set(_terms(term)) - set(terms) and _contains(text, term)]
-        subjects = [name for name in item.get("_subjectNames", []) if _contains(text, name)]
+                 if item.get("planMethod") == "AI research plan" and set(_terms(term)) - set(terms) and contains(term)]
+        subjects = [name for name in item.get("_subjectNames", []) if contains(name)]
         return {"score": len(matched) * 4 + len(hints) + bool(subjects), "literal": literal, "subjectContext": bool(subjects),
                 "terms": matched if literal else hints or subjects, "matches": literal or bool(hints) or bool(subjects)}
 
@@ -716,4 +718,5 @@ class TopicResearch:
             if current.get("deleted") or not current.get("enabled", True) and not current.get("manualAiRequest"): return current
             self._update(topic_id, state="Failed", status="Failed", progress="Research will retry automatically", error="Topic research could not complete; retained evidence remains available.")
             raise
+
 

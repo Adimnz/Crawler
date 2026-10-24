@@ -5,6 +5,12 @@
   let connected = false, session = null, health = null, cursor = { at: 0, id: '' }, pulling = false;
   let serverSources = [], workspace = null, operations = null, metrics = [], lastFailure = '', syncTimer, hydrated = false;
   const dossiers = new Map(), pendingDossiers = new Set();
+  const pendingGets = new Map(), apiWaiters = [];
+  let activeApiRequests = 0, busyUntil = 0, errorProbeAfter = 0;
+  let serviceMode = /^https?:$/.test(location.protocol) ? 'connecting' : 'browser';
+  const acquireApi = () => activeApiRequests < 3 ? (activeApiRequests++, Promise.resolve()) : new Promise(resolve => apiWaiters.push(resolve));
+  const releaseApi = () => { const next=apiWaiters.shift(); if(next)next();else activeApiRequests--; };
+  const busyError = () => Object.assign(new Error('Research server is busy; this request will be retried after a short pause.'), {code:'SERVER_BUSY',status:503,retryAfterMs:Math.max(1000,busyUntil-Date.now())});
   let probing = null, refreshing = null, everConnected = false, shuttingDown = false, probeFailures = 0;
   let nextProbeAt = 0, retryDelay = 15000, lastUpdate = {};
   const inWorkspace = () => true; // Collection outlives navigation; only rendering is view-specific.
@@ -41,20 +47,37 @@
     retryDelay = Math.min(60000, retryDelay * 2);
     lifecycleUI(); if (changed) emit();
   }
-  async function request(path, body, timeout = 45000) {
+  function request(path, body, timeout = 45000) {
+    if(body===undefined && pendingGets.has(path))return pendingGets.get(path);
+    const work=requestOnce(path,body,timeout).finally(()=>{if(body===undefined)pendingGets.delete(path);});
+    if(body===undefined)pendingGets.set(path,work);
+    return work;
+  }
+  async function requestOnce(path, body, timeout) {
+    const healthRequest=path==='ready';
+    if(!healthRequest)await acquireApi();
+    if(!healthRequest && Date.now()<busyUntil){releaseApi();throw busyError();}
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeout);
     try {
       const response = await fetch('/api/' + path, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', signal: controller.signal,
         headers: body === undefined ? {} : { 'Content-Type': 'application/json', 'X-Crawler-CSRF': session?.csrf || '' }, body: body === undefined ? undefined : JSON.stringify(body) });
       const result = await response.json().catch(() => ({ error: 'Research API did not return JSON.' }));
       if (result.status === 'stopping') disconnected(true);
-      if (!response.ok) throw new Error(result.error || 'Research service request failed.');
+      if (!response.ok) {
+        const error=Object.assign(new Error(result.error || 'Research service request failed.'),{status:response.status,code:result.code});
+        if(response.status===503 && result.status!=='stopping') {
+          busyUntil=Date.now()+Math.max(1000,Math.min(30000,result.retryAfterMs || 3000));
+          error.code='SERVER_BUSY';error.retryAfterMs=busyUntil-Date.now();
+        }
+        throw error;
+      }
       return result;
     } catch (error) {
       // A slow research request is not evidence that the server has stopped.
-      if ((error instanceof TypeError || error.name === 'AbortError') && path !== 'ready') probe();
+      if ((error instanceof TypeError || error.name === 'AbortError') && !healthRequest && Date.now()>=errorProbeAfter) {errorProbeAfter=Date.now()+5000;probe();}
+      if(error.name==='AbortError' || controller.signal.aborted) throw Object.assign(new Error('This request timed out. Background research may still be running; retrying does not require restarting the server.'),{code:'REQUEST_TIMEOUT'});
       throw error;
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer);if(!healthRequest)releaseApi(); }
   }
   function probe() {
     if (probing) return probing;
@@ -62,17 +85,19 @@
     return probing;
   }
   async function probeOnce() {
-    if (!/^https?:$/.test(location.protocol)) { emit(); return; }
+    if (!/^https?:$/.test(location.protocol)) { serviceMode='browser';emit(); return; }
     const wasConnected = connected;
     try {
       const result = await request('ready', undefined, 5000);
       if (result.service !== 'trend-crawler' || !result.ready) throw new Error('Research server not ready');
-      health = result; probeFailures = 0;
+      health = result; probeFailures = 0; serviceMode = 'server';
       if (!wasConnected) session = await request('session', undefined, 5000);
       connected = !!session?.authorized;
       if (connected) { everConnected = true; shuttingDown = false; retryDelay = 15000; nextProbeAt = 0; }
       lastFailure = '';
-    } catch {
+    } catch (error) {
+      if(error.code==='SERVER_BUSY'){serviceMode='server';probeFailures=0;nextProbeAt=Date.now()+3000;return;}
+      if(!everConnected && [404,501].includes(error.status)){serviceMode='browser';emit();return;}
       if (++probeFailures >= 3) disconnected();
       if (probeFailures >= 3) lastFailure = 'The research API is not responding. Reconnecting automatically; retained sources remain available.';
     }
@@ -86,9 +111,9 @@
   }
   async function refreshOnce(force = false) {
     if (!connected || document.hidden) return;
-    const cadence = {sources:120000,workspace:60000,operations:90000,metrics:120000,events:60000};
+    const cadence = {sources:120000,workspace:60000,operations:90000,metrics:120000,events:60000,market:60000};
     const names = Object.keys(cadence).filter(name => force || Date.now() - (lastUpdate[name] || 0) > cadence[name]);
-    const results = await Promise.allSettled(names.map(name => request(name)));
+    const results = await Promise.allSettled(names.map(name => request(name==='market'?'market-data':name)));
     for (let index=0; index<names.length; index++) {
       const name=names[index], result=results[index];
       if (result.status !== 'fulfilled') continue;
@@ -97,6 +122,16 @@
       if (name==='workspace') workspace=result.value;
       if (name==='operations') { operations=result.value; health=operations.health; }
       if (name==='metrics') metrics=result.value.observations;
+      if (name==='market') {
+        const rows=result.value.quotes || [],counts=new Map();
+        for(const row of rows)counts.set(row.type+':'+row.symbol,(counts.get(row.type+':'+row.symbol)||0)+1);
+        const activeIds=new Set(rows.map(row=>row.assetId));
+        for(const map of [live,quotes])for(const [symbol,quote] of map)if(!quote.assetId || !activeIds.has(quote.assetId))map.delete(symbol);
+        for(const row of rows)if(row.symbol && row.currency==='USD' && counts.get(row.type+':'+row.symbol)===1) {
+          const quote={price:row.price,chg:null,vol:null,t:row.observedAt,marketAt:row.observedAt,assetId:row.assetId};
+          if(row.type==='crypto')live.set(row.symbol,quote);else quotes.set(row.symbol,quote);
+        }
+      }
       if (name==='events') engine.setServerAnalyses(result.value.events);
     }
     for (const source of serverSources) if (source.health) {
@@ -183,7 +218,7 @@
   }
   window.CrawlerServer = {
     request, refresh, pull, probe, dossier, cachedDossier, mutation, serverEvent,
-    get connected() { return connected; }, get offline() { return everConnected && !connected; }, get stopping() { return shuttingDown; }, get health() { return health; }, get session() { return session; }, get sources() { return serverSources; }, get workspace() { return workspace; }, get operations() { return operations; }, get metrics() { return metrics; }, get error() { return lastFailure; },
+    get mode() { return serviceMode; }, get busy() { return Date.now()<busyUntil; }, get connected() { return connected; }, get offline() { return everConnected && !connected; }, get stopping() { return shuttingDown; }, get health() { return health; }, get session() { return session; }, get sources() { return serverSources; }, get workspace() { return workspace; }, get operations() { return operations; }, get metrics() { return metrics; }, get error() { return lastFailure; },
     async login(token) { session = await request('login', { token }); connected = !!session.authorized; if (connected) { everConnected = true; shuttingDown = false; } lifecycleUI(); emit(); if (inWorkspace()) { refresh().catch(() => {}); pull().catch(() => {}); } },
     async shutdown() {
       if (!connected || !session?.ownerAuthorized) throw new Error('Only the research server owner can stop it.');
@@ -214,4 +249,5 @@
   }, 15000);
   setInterval(() => { if (connected && !document.hidden && inWorkspace()) refresh().catch(() => {}); }, 60000);
 })();
+
 

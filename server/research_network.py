@@ -436,6 +436,8 @@ class ResearchNetwork:
         self._owned("researchBoard", board_id, owner)
         self.db.delete("researchBoard", board_id)
         self.db.delete("recommendationSnapshot", board_id)
+        self.db.delete("recommendationView", board_id)
+        self.db.delete("recommendationJob", board_id)
         for row in self.db.scan("recommendationRevision"):
             if row.get("boardId") == board_id and row.get("ownerId") == owner:
                 self.db.delete("recommendationRevision", board_id + ":" + str(row["revision"]))
@@ -622,5 +624,6 @@ class ResearchNetwork:
                 self.db.put("networkGraph", graph["id"], graph)
                 self.db.put("networkRevision", graph["id"] + ":v" + str(graph["version"]), graph)
         return edge
+
 
 

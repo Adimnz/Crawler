@@ -3,7 +3,7 @@ const WSH = ['wss://stream.binance.com:9443', 'wss://data-stream.binance.vision'
 const live = new Map();
 let wsI = 0, ws, lastMsg = 0;
 function connectTicker() {
-  if (window.CrawlerServer?.offline) return;
+  if (!browserCollectionAllowed() || window.CrawlerServer?.offline || ws) return;
   const me = ws = new WebSocket(WSH[wsI] + '/ws/!miniTicker@arr'); lastMsg = Date.now();
   me.onopen = () => setStatus('Price stream', true, WSH[wsI]);
   me.onmessage = ev => {
@@ -22,12 +22,13 @@ function connectTicker() {
 setInterval(() => { if (ws && Date.now() - lastMsg > 15000) ws.close(); }, 5000);
 connectTicker();
 window.addEventListener('crawler:server-state', () => {
-  if (window.CrawlerServer?.offline && ws) {
+  if ((!browserCollectionAllowed() || window.CrawlerServer?.offline) && ws) {
     const current = ws;
     ws = null; current.onclose = current.onerror = null;
     current.close();
-    setStatus('Price stream', false, 'Research server stopped');
+    setStatus('Price stream', false, 'Using configured research-server prices');
   }
+  if(browserCollectionAllowed() && !ws)connectTicker();
 });
 window.addEventListener('crawler:experience-change', () => {
   if (document.body.dataset.experience === 'workspace') { if (!ws) connectTicker(); }
@@ -45,6 +46,13 @@ async function dexCandles(sym, iv, limit) {
   return j.data.attributes.ohlcv_list.reverse().map(x => ({ t: x[0] * 1000, o: x[1], h: x[2], l: x[3], c: x[4], v: x[5] }));
 }
 async function fetchCandles(type, sym, iv, limit = 150) {
+  if(!browserCollectionAllowed()) {
+    const api=window.CrawlerServer;
+    if(!api?.connected)throw new Error('Waiting for the research server market data.');
+    const result=await api.request('market-data?symbol='+encodeURIComponent(sym)+'&type='+encodeURIComponent(type));
+    if(!result.points.length)throw new Error(result.message || 'No compatible source prices have been collected for this asset.');
+    return result.points.slice(-limit);
+  }
   if (type === 'crypto' && !live.has(sym) && ext.dex.has(sym)) return dexCandles(sym, iv, limit);
   if (type === 'crypto') {
     const k = await binanceREST(`/api/v3/klines?symbol=${sym}USDT&interval=${iv}&limit=${limit}`);
@@ -60,12 +68,13 @@ async function fetchCandles(type, sym, iv, limit = 150) {
 }
 let quoteQueue = [], qi = 0;
 setInterval(async () => {
-  if (window.CrawlerServer?.offline || document.hidden) return;
+  if (!browserCollectionAllowed() || window.CrawlerServer?.offline || document.hidden) return;
   if (!quoteQueue.length) return;
   const sym = quoteQueue[qi++ % quoteQueue.length];
   if (invalid.has(sym)) return;
   try { const c = await fetchCandles('stock', sym, '5m', 80); mini.set('stock:' + sym, { t: Date.now(), c }); setStatus('Yahoo quotes', true); }
   catch (e) { if (!invalid.has(sym)) setStatus('Yahoo quotes', false, e.message); }
 }, 3000);
+
 
 
