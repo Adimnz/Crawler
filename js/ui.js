@@ -22,7 +22,10 @@ function renderPicks() {
     const q = $('filter').value.trim().toUpperCase();
     const assets = [...[...live].map(([sym, value]) => ({sym, type:'crypto', ...value})), ...[...quotes].map(([sym, value]) => ({sym, type:'stock', ...value}))]
       .filter(a => (!typeSel || a.type===typeSel) && (!q || a.sym.includes(q))).sort((a,b) => a.type.localeCompare(b.type) || a.sym.localeCompare(b.sym)).slice(0,200);
-    setHTML($('rows'), assets.map(a => `<button class="market-quote" data-s="${esc(a.sym)}" data-t="${a.type}"><b>${esc(a.sym)} <small>${a.type}</small></b><strong>${Number.isFinite(a.price)?'$'+fmtP(a.price):'Unavailable'}</strong>${chgHTML(a.chg)}<small>${priceFresh(a)?'Provider update':'Stale / unavailable'} · ${a.t?new Date(a.marketAt || a.t).toLocaleTimeString():'No timestamp'}</small></button>`).join('') || '<div class="empty">Waiting for stock and crypto provider quotes. No estimated prices are shown.</div>');
+    setHTML($('rows'), ['stock','crypto'].map(type=>{
+      const rows=assets.filter(a=>a.type===type);if(!rows.length)return '';
+      return `<section class="market-category"><header><h2>${type==='stock'?'Stocks':'Crypto assets'}</h2><span>${rows.length} collected instruments</span></header><div class="market-list-scroll"><table class="market-list"><thead><tr><th>Asset</th><th>Source price · USD</th><th>24h change</th><th>Source timestamp</th><th>Freshness</th></tr></thead><tbody>${rows.map(a=>`<tr><td><button data-s="${esc(a.sym)}" data-t="${a.type}"><b>${esc(a.sym)}</b><small>${esc(a.name || '')}</small></button></td><td>${Number.isFinite(a.price)?'$'+fmtP(a.price):'Unavailable'}</td><td>${Number.isFinite(a.chg)?chgHTML(a.chg):'<span class="dim">Not supplied</span>'}</td><td>${a.t?esc(new Date(a.marketAt || a.t).toLocaleString()):'No timestamp'}</td><td><span class="market-freshness ${priceFresh(a)?'current':''}">${priceFresh(a)?'Within collection window':'Delayed / historical'}</span></td></tr>`).join('')}</tbody></table></div></section>`;
+    }).join('') || '<div class="empty">Waiting for stock and crypto provider quotes. No estimated prices are shown.</div>');
     return;
   }
   const q = $('filter').value.trim().toUpperCase();
@@ -49,7 +52,7 @@ function cardHTML(p) {
   return `<article class="news-card${img ? '' : ' noimg'}"><a class="nc-media" ${href} tabindex="-1" aria-hidden="true">${media}<span class="nc-fallback">${esc(outlet.slice(0, 1).toUpperCase())}</span></a>
     <div class="nc-body"><div class="nc-meta"><i class="dotc ${tone}"></i><b>${esc(outlet)}</b><span>${ago(p.ts)} ago</span></div>
     <a class="nc-title" ${href}>${esc(title.slice(0, 200))}</a>${body ? `<p>${esc(body.slice(0, 180))}</p>` : ''}
-    <div class="nc-tags">${p.tier ? `<span class="tag ${p.w >= .7 ? 'ok' : p.w < .3 ? 'risk' : ''}" title="reliability weight ${(p.w ?? 0).toFixed(2)}">${esc(p.tier)}</span>` : ''}${p.pol ? '<span class="tag pol">political</span>' : ''}${(p.syms || []).slice(0, 3).map(s => `<span class="chip">${esc(s)}</span>`).join('')}</div></div></article>`;
+    <div class="nc-tags">${window.CrawlerActivity?.tags(p.serverId || p.id,p.raw?.sourceVersion) || ''}${p.tier ? `<span class="tag ${p.w >= .7 ? 'ok' : p.w < .3 ? 'risk' : ''}" title="reliability weight ${(p.w ?? 0).toFixed(2)}">${esc(p.tier)}</span>` : ''}${p.pol ? '<span class="tag pol">political</span>' : ''}${(p.syms || []).slice(0, 3).map(s => `<span class="chip">${esc(s)}</span>`).join('')}</div></div></article>`;
 }
 
 function renderDetail() {
@@ -92,6 +95,14 @@ function categoryPages(items, renderItem) {
   }
   return [...groups].map(([category, rows]) => `<section class="category-section"><h2>${esc(category)} <small>${rows.length}</small></h2><div class="category-cards">${rows.map(renderItem).join('')}</div></section>`).join('');
 }
+function newsFrontPage(items) {
+  const fresh=items.filter(p=>Date.now()-p.ts<=3*36e5);
+  const breaking=fresh.filter(p=>/^\s*(?:breaking(?: news)?|news alert|urgent)\b[\s:—-]*/i.test(p.title || p.text)).slice(0,3);
+  const breakingIds=new Set(breaking.map(p=>p.id));
+  const major=items.filter(p=>!breakingIds.has(p.id)&&['primary','wire','major'].includes(p.tier)).slice(0,5);
+  const lead=[...breaking,...major].slice(0,5),leadIds=new Set(lead.map(p=>p.id));
+  return (lead.length?`<section class="news-front"><header><span class="eyebrow">THE NEWSSTAND</span><h2>${breaking.length?'Breaking & top reporting':'Top reporting'}</h2><p>Recent reporting from primary records and major publishers. Breaking labels are carried from source headlines.</p></header>${breaking.length?`<div class="news-breaking"><b>BREAKING</b>${breaking.map(p=>`<a href="${esc(safeURL(p.url))}" target="_blank" rel="noopener noreferrer">${esc(p.title || p.text)}</a>`).join('')}</div>`:''}<div class="news-lead-grid">${lead.map(cardHTML).join('')}</div></section>`:'')+categoryPages(items.filter(p=>!leadIds.has(p.id)),cardHTML);
+}
 function renderNews(full) {
   const heads = sixHourHeads();
   const pol = heads.filter(p => p.pol).length, nz = heads.filter(p => Math.abs(p.sent) > .15), neg = nz.filter(p => p.sent < 0).length;
@@ -107,7 +118,7 @@ function renderNews(full) {
   const th = topics('__news', heads, 8).map(([w, k]) => `<span class="chip">${esc(w)} ${k}</span>`).join('');
   setHTML($('read'), heads.length ? `<p>${heads.length} headlines from ${new Set(heads.map(p => p.sub.split(' via ')[0])).size} outlets in the last 6 hours. ${pol} (${Math.round(pol / heads.length * 100)}%) touch politics or regulation. Overall tone is ${tone}.</p>`
     + (covered ? `<div class="rl">Most covered assets</div>${covered}` : '') + (sectors ? `<div class="rl">Policy themes</div>${sectors}` : '') + (th ? `<div class="rl">Topics</div>${th}` : '') : '<div class="dim">Reading major outlets...</div>');
-  setHTML($('headlines'), categoryPages(heads.filter(p => (!$('polOnly').checked || p.pol) && (! $('filter').value.trim() || (p.title+' '+p.text+' '+p.sub).toLowerCase().includes($('filter').value.trim().toLowerCase()))).slice(0, 60), cardHTML) || '<div class="empty">No headlines yet.</div>');
+  setHTML($('headlines'), newsFrontPage(heads.filter(p => (!$('polOnly').checked || p.pol) && (! $('filter').value.trim() || (p.title+' '+p.text+' '+p.sub).toLowerCase().includes($('filter').value.trim().toLowerCase()))).slice(0, 60)) || '<div class="empty">No headlines yet.</div>');
   const macro = ext.pm.slice(0, 10);
   setHTML($('pmmacro'), macro.length ? `<div class="sh">What prediction markets are pricing in</div>${macro.map(pmHTML).join('')}` : '<div class="dim sm">Loading prediction markets...</div>');
 }

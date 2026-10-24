@@ -38,7 +38,7 @@ window.addEventListener('crawler:experience-change', () => {
 /* ---------------- Stock quotes (Yahoo, rotating) ---------------- */
 const YMAP = { '1m': ['1m', '1d'], '5m': ['5m', '1d'], '15m': ['15m', '5d'], '1h': ['60m', '1mo'], '1d': ['1d', '6mo'] };
 const quotes = new Map(), invalid = new Set(), mini = new Map();
-const priceFresh = (quote, maxAge = 120000) => !!quote && Number.isFinite(quote.price) && Number.isFinite(quote.t) && Date.now() - quote.t <= maxAge;
+const priceFresh = (quote, maxAge = 120000) => !!quote && Number.isFinite(quote.price) && Number.isFinite(quote.t) && Date.now() >= quote.t && Date.now() - quote.t <= (quote.maxAgeMs || maxAge);
 async function dexCandles(sym, iv, limit) {
   const d = ext.dex.get(sym), [tf, agg] = { '1m': ['minute', 1], '5m': ['minute', 5], '15m': ['minute', 15], '1h': ['hour', 1], '1d': ['day', 1] }[iv];
   const net = { polygon: 'polygon_pos', avalanche: 'avax' }[d.chain] || d.chain;

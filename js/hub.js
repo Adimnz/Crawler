@@ -31,7 +31,7 @@
     $('signal-list').insertAdjacentHTML('afterend', '<button class="btn sm" id="show-more-signals">Show more signals</button>');
     const market = document.createElement('section'); market.id = 'overview-markets'; market.className = 'overview-section';
     market.innerHTML = '<div class="hub-section-heading"><h2>The Mark</h2><span>Provider quotes · activity · related reporting</span></div><div class="overview-market-table"></div><details id="overview-radar"><summary>New & low-cost assets</summary></details>';
-    market.querySelector('.overview-market-table').append($('tab-picks'));
+    market.querySelector('.overview-market-table').append($('tab-picks'));market.querySelector('details').hidden=true;
     market.querySelector('details').append($('tab-radar'));
     const news = document.createElement('section'); news.id = 'overview-news'; news.className = 'overview-section';
     news.innerHTML = '<div class="hub-section-heading"><h2>Newsstand</h2><span>Original links, attribution, and timestamps</span></div>';
@@ -87,7 +87,7 @@
   }
   function focusResearch() { navigate('overview'); $('research-query').focus(); $('research-strip').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
   const PAGES = {
-    overview: ['THE RESEARCH DESK', 'Priority signals', 'The developments that matter, with their evidence close at hand.'],
+    overview: ['THE RESEARCH DESK', 'Priority signals', 'Your source-backed briefing, organized for the next research decision.'],
     markets: ['MARKETS', 'The Mark', 'Stock and crypto quotes with provider timestamps. Stale data is labeled.'],
     reporting: ['REPORTING', 'Newsstand', 'Original links, attribution and timestamps from every collected source.'],
     activity: ['ACTIVITY', 'All collected activity', 'Everything the crawler has collected, newest first.']
