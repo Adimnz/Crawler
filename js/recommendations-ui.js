@@ -32,7 +32,7 @@
     const host=document.getElementById('board-recommendations');if(!host)return;
     const open=[...host.querySelectorAll('details[open]')].map(d=>d.dataset.section).filter(Boolean);
     host.innerHTML=`<div class="recommendation-heading"><div><span class="recommendation-kicker">FROM TOPIC TO MARKET</span><h2>Investment research</h2><p>What is supported, when an entry signal qualifies, and the historical outcomes behind it.</p></div><button id="refresh-recommendations">Refresh analysis</button><button id="export-recommendations">Export evidence</button></div>
-      <p class="recommendation-status" role="status">${e(value.assets.filter(row=>row.status==='Eligible entry signal' && row.expiresAt>Date.now()).length)} eligible entry signal(s) · revision ${e(value.revision)} · assessed ${date(value.asOf)}</p>
+      <div id="recommendation-progress">${window.CrawlerActivity?.progress(value.progress || {percent:100,stage:"Current research assessment complete"},"Recommendation assessment progress") || ""}</div><p class="recommendation-status" role="status">${e(value.assets.filter(row=>row.status==='Eligible entry signal' && row.expiresAt>Date.now()).length)} eligible entry signal(s) · revision ${e(value.revision)} · assessed ${date(value.asOf)}</p>
       <p class="recommendation-small">${e(value.coverage.storedDocumentsScreened)} stored documents screened · ${e(value.coverage.relevantDocuments)} relevant records · ${e(value.coverage.branchesIncluded)} research branches · ${e(value.coverage.candidateAssets)} resolved candidates. Displaying ${value.assets.length} of ${value.assetCount ?? value.assets.length}; export includes all candidates.</p>
       <div class="recommendation-grid">${value.assets.map(card).join('') || '<div class="recommendation-empty"><h3>No supported asset candidates yet</h3><p>Continue topic research to identify publicly traded stocks or crypto assets with provider-verified identities and source citations. Stock return analysis requires an explicit daily price connector; SEC filings alone do not supply market prices.</p></div>'}</div>
       <details data-section="changes"><summary>What changed?</summary><ul>${value.whatChanged.map(v=>`<li>${e(v)}</li>`).join('')}</ul></details>
@@ -53,7 +53,7 @@
       if(value.refreshing) {
         current=null;
         if(value.coverage){render(value);const p=document.getElementById('board-recommendations')?.querySelector('.recommendation-status');if(p)p.textContent=value.message;}
-        else {const host=document.getElementById('board-recommendations');if(host)host.textContent=value.message || 'Recommendation research is running in the background.';}
+        else {const host=document.getElementById('board-recommendations');if(host)host.innerHTML='<div class="recommendation-heading"><div><span class="recommendation-kicker">FROM TOPIC TO MARKET</span><h2>Assessing investment research</h2></div></div><div id="recommendation-progress">'+(window.CrawlerActivity?.progress(value.progress,'Recommendation assessment progress') || '<p>'+e(value.message)+'</p>')+'</div>'; }
         return;
       }
       current=value;render(value);
