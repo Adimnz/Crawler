@@ -6,19 +6,20 @@ chronological order with purged, non-overlapping outcome windows.
 """
 from __future__ import annotations
 from collections import OrderedDict, defaultdict
+import copy
 import math
 import statistics
 import threading
 
 from . import analysis as a
 from .financial_analysis import _prepare, _prices, _daily_gap, _input, _availability, _currency, PRICE_METRICS
-from .storage import dumps, now_ms
+from .storage import dumps, now_ms, identifier
 
 MODEL_VERSION = 'topic-analogues-1'
 POLICY = {'lookbackSessions': 20, 'horizonSessions': 5, 'minimumTrainingSamples': 30,
           'minimumAnalogues': 20, 'maximumAnalogues': 40, 'minimumValidationSamples': 20,
           'minimumValidationSignals': 10, 'marketMaxAgeHours': 36, 'providerDisagreementPercent': 1, 'maximumHistorySessions': 1500}
-DEPENDENCIES = ('source', 'document', 'claim', 'asset', 'observation', 'observationVintage',
+DEPENDENCIES = ('sourceConfiguration', 'document', 'claim', 'asset', 'observation', 'observationVintage',
                 'relationship', 'networkGraph', 'topicPortfolio', 'setting')
 BAD_STATES = {'Disputed', 'Contradicted', 'Retracted', 'Misleading', 'Review required'}
 
@@ -167,21 +168,73 @@ class RecommendationEngine:
         self.s, self.db = service, service.db
         self.cache = OrderedDict()
         self.lock = threading.RLock()
+        self.queue_lock = threading.Lock()
+        self.views = OrderedDict()
+
+    def _signature(self, board):
+        return (tuple(self.db.kind_revisions.get(k,0) for k in DEPENDENCIES), tuple(board.get('branchTopics',[])), board.get('expansionState'),board.get('archived'))
+
+    def _queue(self, owner, board_id):
+        with self.queue_lock:
+            prior = self.db.get('recommendationJob',board_id) or {}
+            job = self.db.get_job(prior.get('jobId',''))
+            if job and job['state'] in {'queued','running'}: return job['id']
+            job_id = self.db.enqueue('recommendation-review',{'ownerId':owner,'boardId':board_id},identifier('recommendation-refresh'))
+            self.db.put('recommendationJob',board_id,{'id':board_id,'ownerId':owner,'jobId':job_id})
+            return job_id
+
+    def view(self, owner, board_id, full=False):
+        board = self.s.network_research._owned('researchBoard',board_id,owner)
+        now = now_ms()
+        view = self.views.get(board_id) or self.db.get('recommendationView',board_id)
+        fresh = bool(view and view.get('inputSignature') == a.digest(dumps(self._signature(board))) and now < view.get('validUntil',0))
+        if fresh:
+            if full: return self.db.get('recommendationSnapshot',board_id)
+            return view
+        self._queue(owner,board_id)
+        if view:
+            result = copy.deepcopy(view)
+            for item in result['assets']:
+                item.update(status='Updating evidence',potentialReturn=None,timing='Wait for the background assessment to complete.')
+                item['blockers'] = list(dict.fromkeys(item.get('blockers',[])+['Sources or freshness changed; reassessment is running.']))
+            result['eligibleCount']=0
+        else:
+            result = {'boardId':board_id,'assets':[],'eligibleCount':0}
+        return {**result,'status':'Updating','refreshing':True,'retryAfterMs':10000,'message':'Recommendation research is running in the background. The research server is connected.'}
+
+    def _publish_view(self, result, signature, expiry):
+        # Strip large replay arrays before copying, rather than duplicating them in RAM.
+        view = copy.deepcopy({k:v for k,v in result.items() if k not in {'assets','sourceManifest'}})
+        view['assetCount'] = len(result['assets'])
+        view['assets'] = []
+        for item in result['assets'][:50]:
+            analysis={k:v for k,v in item.get('analysis',{}).items() if k not in {'historyInputs','historyInputIds','outcomeSamples','exclusions','validation'}}
+            validation=item.get('analysis',{}).get('validation')
+            if validation: analysis['validation']={k:v for k,v in validation.items() if k!='folds'}
+            preview={k:v for k,v in item.items() if k not in {'analysis','topicEvidence'}}
+            preview['analysis']=analysis
+            preview['topicEvidenceCount']=len(item.get('topicEvidence',[]))
+            preview['topicEvidence']=[{**r,'quote':r.get('quote','')[:600]} for r in item.get('topicEvidence',[])[:12]]
+            view['assets'].append(copy.deepcopy(preview))
+        view['sourceManifestCount'] = len(result.get('sourceManifest',[]))
+        view['sourceManifest'] = copy.deepcopy(result.get('sourceManifest',[])[:50])
+        view.update(refreshing=False,validUntil=expiry,inputSignature=a.digest(dumps(signature)))
+        self.views[result['boardId']] = view
+        self.views.move_to_end(result['boardId'])
+        if len(self.views)>32: self.views.popitem(last=False)
+        self.db.put('recommendationView',result['boardId'],view)
 
     def queue_due(self, at=None):
         at = at or now_ms()
-        queued = []
-        for snapshot in sorted(self.db.scan('recommendationSnapshot'), key=lambda row:row.get('asOf',0)):
-            board = self.db.get('researchBoard', snapshot['boardId'])
+        queued=[]
+        for view in sorted(self.db.scan('recommendationView'),key=lambda row:row.get('asOf',0)):
+            board=self.db.get('researchBoard',view['boardId'])
             if not board or board.get('archived'): continue
-            if at - snapshot.get('asOf',0) < 60000: continue
-            cached = self.cache.get((board['ownerId'], board['id']))
-            signature = (tuple(self.db.kind_revisions.get(k,0) for k in DEPENDENCIES), tuple(board.get('branchTopics',[])),board.get('expansionState'),board.get('archived'))
-            if cached and cached[0] == signature and at < cached[1]: continue
-            # At most four reviews are queued per scheduler pass; normal worker leases apply.
-            active = any(job['payload'].get('boardId')==board['id'] for job in self.db.jobs('queued',1000)+self.db.jobs('running',1000) if job['kind']=='recommendation-review')
-            if active: continue
-            queued.append(self.db.enqueue('recommendation-review', {'ownerId':board['ownerId'],'boardId':board['id']}, 'recommendation-review:'+board['id']+':'+str(at//60000)))
+            if view.get('inputSignature') == a.digest(dumps(self._signature(board))) and at < view.get('validUntil',0): continue
+            prior=self.db.get('recommendationJob',board['id']) or {}
+            job=self.db.get_job(prior.get('jobId',''))
+            if job and job['state'] in {'queued','running'}: continue
+            queued.append(self._queue(board['ownerId'],board['id']))
             if len(queued)>=4: break
         return queued
 
@@ -207,9 +260,10 @@ class RecommendationEngine:
         assets = {row['id']: row for row in self.db.scan('asset') if row.get('assetClass') in {'equity', 'crypto'} and row.get('identityVerified')}
         sources = {r['id']:r for r in self.db.scan('source')}
         docs, considered, relevance = {}, 0, defaultdict(list)
+        contexts = [{**t,'_subjectNames':self.s.topics._subject_names(t)} for t in topics]
         for doc in self.db.scan('document'):
             considered += 1
-            matching = [t for t in topics if self.s.topics._match(doc, {**t, '_subjectNames': self.s.topics._subject_names(t)})['matches']]
+            matching = [t for t in contexts if self.s.topics._match(doc,t)['matches']]
             if doc['id'] not in explicit and not matching: continue
             docs[doc['id']] = doc
             for asset_id, asset in assets.items():
@@ -272,7 +326,8 @@ class RecommendationEngine:
             # Dataset updates invalidate immediately; the clock also expires stale prices.
             expiry = min([at+300000]+[r['expiresAt'] for r in result['assets'] if r.get('expiresAt') and r['expiresAt']>at])
             self.cache[key] = signature, expiry, result
-            if len(self.cache)>32: self.cache.popitem(last=False)
+            if len(self.cache)>4: self.cache.popitem(last=False)
+            self._publish_view(result,signature,expiry)
             return result
 
     @staticmethod
@@ -358,3 +413,4 @@ class RecommendationEngine:
         result['assets'].sort(key=lambda r:(r['status']!='Eligible entry signal', -(r.get('potentialReturn') or {}).get('medianPercent',0),r['assetId']))
         result['eligibleCount'] = sum(r['status']=='Eligible entry signal' for r in result['assets'])
         return result
+

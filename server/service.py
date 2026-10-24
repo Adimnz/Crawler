@@ -337,6 +337,31 @@ class ResearchService:
                 "reportingChains": [[d["id"] for d in group] for group in a.reporting_chains(docs)], "metrics": metrics,
                 "graph": self.graph(event_id), "investigations": investigations, "relationshipsAreCausal": False}
 
+    def market_data(self, symbol="", asset_type=""):
+        """Bounded, indexed source observations; no network access or fabricated OHLC."""
+        from .financial_analysis import _availability, _currency
+        assets = {row['id']:row for row in self.db.latest('asset',1000) if row.get('identityVerified') and row.get('assetClass') in {'equity','crypto'}}
+        selected = None
+        if symbol:
+            matches=[row for row in assets.values() if str(row.get('ticker','')).upper()==symbol.upper() and (not asset_type or row['assetClass']==('equity' if asset_type=='stock' else asset_type))]
+            if len(matches)!=1: return {'quotes':[],'points':[],'message':'No unique provider-verified instrument matches this symbol. Configure its market source in Sources & System.'}
+            selected=matches[0]['id']
+        sources={row['id']:row for row in self.db.list('source')}
+        at=now_ms()
+        rows=self.db.market_observations(selected)
+        rows=[r for r in rows if r.get('assetId') in assets and r.get('canonical',True) and not r.get('removed') and (sources.get(r.get('sourceId')) or {}).get('enabled') and (sources.get(r.get('sourceId')) or {}).get('tier')=='primary' and (_availability(r) or at+1)<=at and r.get('observedAt',at+1)<=at and isinstance(r.get('value'),(int,float)) and not isinstance(r['value'],bool) and math.isfinite(r['value']) and r['value']>0 and _currency(r)]
+        latest={}
+        for row in rows:
+            if row['assetId'] not in latest or row['observedAt']>latest[row['assetId']]['observedAt']:latest[row['assetId']]=row
+        quotes=[{'assetId':aid,'symbol':assets[aid].get('ticker'),'name':assets[aid].get('name'),'type':'stock' if assets[aid]['assetClass']=='equity' else 'crypto','price':row['value'],'currency':_currency(row),'observedAt':row['observedAt'],'sourceId':row['sourceId'],'basis':row.get('metric')} for aid,row in latest.items()]
+        points=[]
+        if selected in latest:
+            current=latest[selected]
+            compatible=[r for r in rows if r['sourceId']==current['sourceId'] and r.get('metric')==current.get('metric') and _currency(r)==_currency(current) and r.get('adjustment')==current.get('adjustment')]
+            by_time={r['observedAt']:r for r in compatible}
+            points=[{'t':r['observedAt'],'c':r['value'],'kind':'source-price','v':None} for r in sorted(by_time.values(),key=lambda r:r['observedAt'])[-300:]]
+        return {'quotes':quotes,'points':points,'asOf':at,'limit':2000,'message':'Only collected prices are shown, in their native source intervals. No OHLC series is inferred from closing-only data.'}
+
     def observation(self, source, values, at=None):
         at = at or now_ms()
         asset_id = str(values.get("assetId", ""))
@@ -956,4 +981,5 @@ class ResearchService:
                 except OSError:
                     pass
         return [thread.name for thread in self.threads if thread.is_alive()]
+
 

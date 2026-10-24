@@ -169,7 +169,7 @@ function renderMovers() {
 }
 // One mini-chart fetch at a time, only while the tab is visible.
 setInterval(async () => {
-  if (window.CrawlerServer?.offline || document.hidden) return;
+  if (!browserCollectionAllowed() || window.CrawlerServer?.offline || document.hidden) return;
   for (const x of moversNow) {
     const k = x.type + ':' + x.sym, e = mini.get(k);
     if (e && Date.now() - e.t < (x.type === 'crypto' ? 90000 : 3e5)) continue;
@@ -225,4 +225,5 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) renderAll(); });
 renderAll();
+
 

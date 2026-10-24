@@ -6,6 +6,14 @@ function drawCandles(cv, cs, isMini, hover, iv) {
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
   const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
   if (!cs.length) return null;
+  if(cs.some(c=>![c.o,c.h,c.l].every(Number.isFinite))) {
+    const values=cs.map(c=>c.c),minimum=Math.min(...values),maximum=Math.max(...values),span=maximum-minimum || 1;
+    const width=w-(isMini?4:60),height=h-20;
+    g.strokeStyle='#9ccab2';g.lineWidth=1.5;g.beginPath();
+    cs.forEach((c,i)=>{const x=i*width/Math.max(1,cs.length-1),y=5+(maximum-c.c)/span*(height-10);if(i)g.lineTo(x,y);else g.moveTo(x,y);});g.stroke();
+    if(!isMini){g.fillStyle='#9aafa3';g.font='11px system-ui';g.fillText('Source price observations',8,16);g.fillText(fmtP(values[values.length-1]),width+3,height/2);}
+    return {cw:width/Math.max(1,cs.length)};
+  }
   const padR = isMini ? 2 : 64, padB = isMini ? 2 : 18, volH = isMini ? 0 : Math.round(h * .16);
   const pw = w - padR, ph = h - padB - volH;
   let hi = -Infinity, lo = Infinity, vmax = 0;
@@ -46,6 +54,7 @@ $('chart').onmousemove = e => {
   if (!chartGeom || !candles.length) return;
   hover = Math.min(candles.length - 1, Math.max(0, Math.floor(e.offsetX / chartGeom.cw)));
   const c = candles[hover];
+  if(c.kind==='source-price'){ $('ohlc').textContent=new Date(c.t).toLocaleString()+' · Source price '+fmtP(c.c)+' · Native source sessions';drawMain();return; }
   $('ohlc').textContent = `${new Date(c.t).toLocaleString()}  O ${fmtP(c.o)}  H ${fmtP(c.h)}  L ${fmtP(c.l)}  C ${fmtP(c.c)}  Vol ${c.v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
   drawMain();
 };
@@ -63,10 +72,11 @@ async function loadChart() {
   try { candles = await fetchCandles(type, sym, iv); } catch (e) { $('ohlc').textContent = 'No chart data: ' + e.message; return; }
   if (tok !== chartTok) return;
   drawMain();
-  if (type === 'crypto' && live.has(sym)) openKline(sym, tok);
-  else stockTimer = setInterval(async () => { try { const c = await fetchCandles(type, sym, iv); if (tok === chartTok) { candles = c; drawMain(); } } catch (e) {} }, 8000);
+  if (browserCollectionAllowed() && type === 'crypto' && live.has(sym)) openKline(sym, tok);
+  else stockTimer = setInterval(async () => { try { const c = await fetchCandles(type, sym, iv); if (tok === chartTok) { candles = c; drawMain(); } } catch (e) {} }, browserCollectionAllowed()?8000:60000);
 }
 function openKline(sym, tok) {
+  if(!browserCollectionAllowed())return;
   const s = new WebSocket(`${WSH[wsI]}/ws/${sym.toLowerCase()}usdt@kline_${iv}`);
   kws = s;
   s.onmessage = ev => {
@@ -83,4 +93,5 @@ async function select(sym, type, picked) {
   try { (await fetchJSON(`https://api.stocktwits.com/api/2/streams/symbol/${sym}${type === 'crypto' ? '.X' : ''}.json`)).messages.forEach(m => addPost(stMessage(m))); } catch (e) {}
   renderAll();
 }
+
 

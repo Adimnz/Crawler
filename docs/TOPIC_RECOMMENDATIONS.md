@@ -109,7 +109,7 @@ Provider documentation: https://www.alphavantage.co/documentation/#dailyadj
 
 ## Refresh, lifeline and revision history
 
-The visible panel checks every 10 seconds. Any relevant dataset write invalidates
+The visible panel reads a compact cached view every 10 seconds, with backoff on server pressure. Missing or stale calculations return HTTP 202 and run once in the existing background worker queue. Replay arrays and full source manifests are loaded only by the explicit export request; the HTTP read never runs the model. Any relevant dataset write invalidates
 the cache; a price older than 36 hours expires entry eligibility even without a new
 record. The clock is also checked client-side, and transport failure clears active
 recommendations. Five source sessions describe the analysis horizon; no future
@@ -133,3 +133,4 @@ https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TimeSe
 
 Performance interpretation:
 https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-bulletins-47
+

@@ -298,3 +298,35 @@ evidence**. Numerical article-to-return effects are not fabricated. See
 [the recommendation methodology and setup](docs/TOPIC_RECOMMENDATIONS.md) for the
 exact gates, historical availability limits, optional adjusted daily equity
 connector, background refresh and remaining model limitations.
+
+
+
+## Request stability and recommendation updates
+
+Recommendation status reads return a compact cached view or HTTP 202 while a
+single background job computes the result. Repeated tabs/polls coalesce onto the
+same durable job. Changed evidence withholds entry advice until the worker
+publishes a current result. Full replay evidence remains available through export.
+
+The HTTP server has two bounded recovery handlers for health and static files,
+in addition to its existing ordinary-request limit. Busy replies carry a
+`SERVER_BUSY` code; client requests back off without declaring the process dead.
+The client allows three concurrent data requests, coalesces identical GETs, and
+keeps readiness checks independent. Timeouts explain that background research may
+still be running. Recommendation reads do not restart on every source-sync event.
+
+Local Python mode waits for readiness before collection. Feeds, predictions and
+market lookups use configured server sources rather than direct browser calls
+through public CORS proxies. The Mark and charts read indexed, collected market
+observations; closing-only data is drawn as a source-price line, never invented
+OHLC candles. Standalone browser collection is enabled for file pages or an
+explicit missing-API (404/501) response, not temporary connection failures.
+
+Subject citations are validated once per topic context; source text is normalized
+once per match. Health-only source updates do not invalidate recommendation
+inputs. Large replay arrays are stripped before view copies, and the full-result
+cache retains at most four boards. These changes reduce database traffic, copied
+RAM and repeated model work while retaining full persisted evidence.
+
+After updating a running installation, restart the Python server once and hard
+refresh existing browser tabs so they load the matching JavaScript.
