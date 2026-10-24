@@ -67,7 +67,7 @@ The [expanded specification](docs/DEEP_RESEARCH_NETWORK_SPEC.md) is retained as 
 
 ## Personal accounts — Supabase
 
-The supplied project is prefilled as **`https://lowvafwxnuqtogsfkmkd.supabase.co`**. To finish connecting it:
+Personal accounts require your own Supabase project, configured privately on the research server. No project URL or credentials are bundled. To connect an account provider:
 
 1. Start the Python server and open **Account → Account provider setup**. Enter the project's **publishable / anon key**, then choose **Verify & connect**. Alternatively set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in `CRAWLER/.env` and restart.
 2. In Supabase Authentication, enable email/password sign-in and email confirmation. Configure email delivery and allow the local redirect URL **`http://127.0.0.1:8765/CRAWLER/account.html?view=callback`**. If using another host or port, allow its exact callback instead. For deployment set `CRAWLER_PUBLIC_URL` to the app's HTTPS origin and allow the corresponding callback.
@@ -286,3 +286,15 @@ Regression checks: `python -m unittest discover -s tests -p 'test_*.py'` and
 `node --test tests/research.test.cjs tests/connection.test.cjs`. Browser gesture
 and visual tests remain in `tests/*-browser.cjs` and require a local Chromium
 installation and `PLAYWRIGHT_MODULE` / `CHROME_PATH` configuration.
+
+
+## Topic investment recommendations
+
+The observation board now includes source-linked asset candidates, a fixed
+historical-analogue price model, purged chronological validation, conditional
+return ranges, cost inputs, expiration and versioned recommendation changes.
+Missing data, contradictions or failed validation return **Wait / insufficient
+evidence**. Numerical article-to-return effects are not fabricated. See
+[the recommendation methodology and setup](docs/TOPIC_RECOMMENDATIONS.md) for the
+exact gates, historical availability limits, optional adjusted daily equity
+connector, background refresh and remaining model limitations.

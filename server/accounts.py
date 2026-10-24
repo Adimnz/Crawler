@@ -18,14 +18,11 @@ from .ai_settings import _dpapi
 from .connectors import ConnectorError
 from .storage import now_ms
 
-DEFAULT_PROJECT = "https://lowvafwxnuqtogsfkmkd.supabase.co"
-
-
 class AccountAuth:
     def __init__(self, service, directory):
         self.s, self.directory = service, Path(directory)
         self.lock = threading.RLock()
-        self.url = os.getenv("SUPABASE_URL", DEFAULT_PROJECT).rstrip("/")
+        self.url = os.getenv("SUPABASE_URL", "").rstrip("/")
         self.key = os.getenv("SUPABASE_PUBLISHABLE_KEY", os.getenv("SUPABASE_ANON_KEY", ""))
         self.admin_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
         self.sessions, self.limits = {}, defaultdict(deque)
@@ -78,7 +75,7 @@ class AccountAuth:
 
     def provider(self, method, path, body=None, token=None, url=None, key=None, api="auth/v1"):
         project, publishable = (url or self.url), (key or self.key)
-        if not publishable: raise ValueError("Connect your Supabase project in Account setup first")
+        if not project or not publishable: raise ValueError("Connect your Supabase project in Account setup first")
         headers = {"apikey": publishable, "Content-Type": "application/json"}
         if token: headers["Authorization"] = "Bearer " + token
         try:
