@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
 import ipaddress
 import json
+import sys
 import mimetypes
 import os
 from pathlib import Path
@@ -24,6 +25,12 @@ from .research_network import BoardConflict
 class AppServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 32
+
+    def handle_error(self, request, client_address):
+        # Browsers abort sockets when pages navigate or requests are cancelled; that is not a server fault.
+        if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
 
     def process_request(self, request, client_address):
         # ThreadingHTTPServer otherwise creates an unbounded thread per connection.
@@ -86,20 +93,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def json(self, value, status=200, cookie=None):
         data = json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
-        try:
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Referrer-Policy", "same-origin")
-            if cookie:
-                for item in cookie if isinstance(cookie, list) else [cookie]: self.send_header("Set-Cookie", item)
-            self.end_headers()
-            self.wfile.write(data)
-        except (ConnectionError, TimeoutError):
-            # Client went away before the response finished; nothing left to send.
-            self.close_connection = True
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "same-origin")
+        if cookie:
+            for item in cookie if isinstance(cookie, list) else [cookie]: self.send_header("Set-Cookie", item)
+        self.end_headers()
+        self.wfile.write(data)
 
     def session(self):
         cookie = SimpleCookie()
